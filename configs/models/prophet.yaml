@@ -1,0 +1,3 @@
+type: prophet
+num_samples: 100
+coverage_level: 0.9

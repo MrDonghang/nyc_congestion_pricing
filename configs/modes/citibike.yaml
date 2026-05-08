@@ -1,0 +1,15 @@
+mode: citibike
+drop_columns_with_zero_share_above: 0.5
+weekday_only: false
+
+# Citibike tunes on the 3 months immediately preceding the policy, not the
+# year-displaced Jan–Apr window used for bus/subway.
+windows:
+  validation:
+    train_end:  "2024-09-30"
+    test_start: "2024-10-01"
+    test_end:   "2025-01-04"
+  test:
+    train_end:  "2025-01-04"
+    test_start: "2025-01-05"
+    test_end:   "2025-04-30"

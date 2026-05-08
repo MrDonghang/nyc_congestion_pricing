@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local config overrides
+configs/paths.local.yaml
+
+# Outputs (generated)
+outputs/
+logs/
+
+# Editor
+.vscode/
+.idea/
+.DS_Store

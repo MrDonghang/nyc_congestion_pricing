@@ -1,0 +1,30 @@
+# Single source of truth for input/output roots.
+# Override on a given machine by creating configs/paths.local.yaml (gitignored).
+
+raw_root:    /public_dataset/donghang/nyc_congestion_pricing/raw_data
+data_root:   /public_dataset/donghang/nyc_congestion_pricing/data_processed
+output_root: /public_dataset/donghang/nyc_congestion_pricing/output
+geo_root:    geo_data
+log_root:    logs
+
+# Per-mode resolved file paths (relative to data_root unless absolute).
+modes:
+  bus:
+    actual: bus/bus_data_2022_2025_daily_final.csv
+    freq: D
+    directions: ["all"]              # bus has no O/D split
+  subway:
+    actual: subway/subway_2023_2025_daily_{direction}.csv
+    freq: D
+    directions: ["O", "D"]
+  citibike:
+    actual: citibike/census/citibike_censustract_od_2022_2025_NYC_{direction}.csv
+    freq: D
+    directions: ["O", "D"]
+  replica:
+    actual: replica/od/census_tract_{direction_long}_matrix.csv
+    freq: W
+    directions: ["O", "D"]
+
+# Forecast windows live per-mode in configs/modes/<mode>.yaml — they are not the same
+# across modes (citibike and replica use different validation horizons than bus/subway).
