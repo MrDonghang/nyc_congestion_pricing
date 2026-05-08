@@ -1,0 +1,6 @@
+type: chronos
+model_id: amazon/chronos-2
+device: cuda
+dtype: bfloat16
+batch_size: 32
+coverage_level: 0.9

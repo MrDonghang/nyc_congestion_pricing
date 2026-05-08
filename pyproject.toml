@@ -27,6 +27,10 @@ dependencies = [
     "pmdarima",
     "statsmodels",
     "optuna",
+    # Foundation / neural forecasters
+    "chronos-forecasting>=2.0",  # amazon/chronos-2
+    "timesfm",                   # google/timesfm-2.0-500m-pytorch
+    "neuralforecast",            # NHITS, TFT
     # Geospatial / causal
     "geopandas",
     "shapely",

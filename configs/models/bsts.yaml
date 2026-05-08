@@ -1,0 +1,7 @@
+type: bsts
+level: local linear trend
+seasonal_period: null   # auto: 7 for daily, 52 for weekly, 12 for monthly
+stochastic_seasonal: true
+cycle: false
+stochastic_cycle: true
+coverage_level: 0.9

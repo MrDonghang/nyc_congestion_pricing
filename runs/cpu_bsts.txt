@@ -1,0 +1,13 @@
+# CPU session — BSTS is statsmodels Kalman filter, no GPU needed
+# Run in parallel with GPU 3, doesn't compete for GPU.
+
+bus all bsts val
+bus all bsts test
+subway O bsts val
+subway O bsts test
+subway D bsts val
+subway D bsts test
+citibike O bsts val
+citibike O bsts test
+citibike D bsts val
+citibike D bsts test

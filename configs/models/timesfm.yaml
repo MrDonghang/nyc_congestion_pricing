@@ -1,0 +1,9 @@
+type: timesfm
+model_id: google/timesfm-2.0-500m-pytorch
+context_len: 2048
+num_layers: 50
+model_dims: 1280
+use_positional_embedding: false
+batch_size: 32
+backend: gpu
+coverage_level: 0.9

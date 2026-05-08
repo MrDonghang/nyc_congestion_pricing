@@ -31,4 +31,24 @@ def build_forecaster(model_config: dict[str, Any]) -> BaseForecaster:
         from nyc_cp.models.pcn import PCNForecaster
 
         return PCNForecaster(model_config)
+    if kind == "chronos":
+        from nyc_cp.models.chronos import ChronosForecaster
+
+        return ChronosForecaster(model_config)
+    if kind == "timesfm":
+        from nyc_cp.models.timesfm import TimesFMForecaster
+
+        return TimesFMForecaster(model_config)
+    if kind == "nhits":
+        from nyc_cp.models.neuralforecast_models import NHITSForecaster
+
+        return NHITSForecaster(model_config)
+    if kind == "tft":
+        from nyc_cp.models.neuralforecast_models import TFTForecaster
+
+        return TFTForecaster(model_config)
+    if kind == "bsts":
+        from nyc_cp.models.bsts import BSTSForecaster
+
+        return BSTSForecaster(model_config)
     raise ValueError(f"Unknown model type: {kind!r}")

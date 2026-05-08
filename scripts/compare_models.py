@@ -33,7 +33,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D"], default="all")
-    p.add_argument("--models", nargs="+", default=["arima", "prophet", "deepar", "pcn"])
+    p.add_argument("--models", nargs="+", default=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts"])
     p.add_argument("--coverage-level", type=float, default=0.9)
     return p.parse_args()
 

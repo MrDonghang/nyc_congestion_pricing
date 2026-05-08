@@ -37,7 +37,7 @@ log = logging.getLogger("train_forecast")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
-    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn"])
+    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D"], default="all")
     p.add_argument("--seed", type=int, default=42)

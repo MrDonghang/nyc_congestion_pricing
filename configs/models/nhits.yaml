@@ -1,0 +1,7 @@
+type: nhits
+input_size: 180
+max_steps: 1000
+batch_size: 32
+learning_rate: 1.0e-3
+scaler_type: standard
+coverage_level: 0.9
