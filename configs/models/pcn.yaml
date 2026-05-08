@@ -1,20 +1,21 @@
 type: pcn
-variant: unidirectional        # "unidirectional" | "bidirectional"
-batch_length: 360
-hidden_sizes: [256, 128]
-iterations: 10
-activation: relu
+batch_length: 360               # default; Optuna can override per-series
+hidden_sizes: [256, 128]        # [hidden1, hidden2]; Optuna can override per-series
+iterations: 10                  # iterative inference depth; Optuna can override
+inference_lr: 0.05              # step size for iterative refinement
+activation: tanh                # tanh | relu — applied inside PCNLayer.bottom_up_encode
 coverage_level: 0.9
 prediction:
-  method: analytic             # "analytic" | "sampling"
+  method: analytic              # "analytic" | "sampling"
   num_samples: 100
 training:
   epochs: 200
   batch_size: 32
   lr: 1.0e-3
   weight_decay: 1.0e-4
-  alpha: 10.0                  # constraint loss weight (mu[0] ~ x[-1])
-  beta:  0.5                   # derivative-MSE weight
+  alpha: 10.0                   # boundary continuity:    (mu[0] - x[-1])^2
+  beta:  0.5                    # first-derivative match: SmoothL1(diff(mu), diff(y))
+  gamma: 0.1                    # hierarchical free energy: mean(layer_errors^2)
   test_split: 0.2
   val_split: 0.1
   patience: 10
@@ -22,11 +23,13 @@ optuna:
   n_trials: 30
   reuse_first_column_params: true
   search_space:
-    lr: { type: loguniform, low: 1.0e-5, high: 1.0e-2 }
+    lr:           { type: loguniform, low: 1.0e-5, high: 1.0e-2 }
     weight_decay: { type: loguniform, low: 1.0e-6, high: 1.0e-2 }
-    alpha: { type: uniform, low: 1.0, high: 20.0 }
-    beta:  { type: uniform, low: 0.1, high: 1.0 }
-    hidden1: { type: categorical, choices: [128, 256, 512] }
-    hidden2: { type: categorical, choices: [64, 128, 256] }
-    iterations: { type: int, low: 5, high: 20 }
-    batch_size: { type: categorical, choices: [16, 32, 64] }
+    alpha:        { type: uniform,    low: 1.0,    high: 20.0 }
+    beta:         { type: uniform,    low: 0.1,    high: 1.0 }
+    gamma:        { type: uniform,    low: 0.05,   high: 0.2 }
+    hidden1:      { type: categorical, choices: [128, 256, 512] }
+    hidden2:      { type: categorical, choices: [64, 128, 256] }
+    iterations:   { type: int, low: 5, high: 20 }
+    batch_size:   { type: categorical, choices: [16, 32, 64] }
+    batch_length: { type: categorical, choices: [24, 60, 90, 120, 180, 240, 360] }

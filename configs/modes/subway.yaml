@@ -3,7 +3,7 @@ drop_all_zero_columns: true
 weekday_only: false
 
 windows:
-  validation:
+  val:
     train_end:  "2024-01-04"
     test_start: "2024-01-05"
     test_end:   "2024-04-30"

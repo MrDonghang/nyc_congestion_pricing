@@ -29,6 +29,7 @@ class DeepARForecaster(BaseForecaster):
 
         self._predictor = None
         self._history: pd.DataFrame | None = None
+        self._actual: pd.DataFrame | None = None
         self._train_end: pd.Timestamp | None = None
         self._prediction_length: int | None = None
 
@@ -54,6 +55,9 @@ class DeepARForecaster(BaseForecaster):
         return estimator.train(training_data=train_ds, num_workers=4, cache_data=True)
 
     def _tune(self, history: pd.DataFrame, train_end: pd.Timestamp, prediction_length: int) -> dict:
+        """Internal cross-validation: hold out the last ``prediction_length`` of
+        ``history`` (still ≤ train_end), train on the rest, score the held-out
+        portion. No leakage — the held-out window is fully pre-policy."""
         import optuna
 
         from nyc_cp.evaluation.metrics import evaluate_per_series
@@ -67,8 +71,21 @@ class DeepARForecaster(BaseForecaster):
             nl = trial.suggest_int("num_layers", space["num_layers"]["low"], space["num_layers"]["high"])
             dr = trial.suggest_float("dropout_rate", space["dropout_rate"]["low"], space["dropout_rate"]["high"])
             predictor = self._train_predictor(history, train_end, prediction_length, ctx, nl, dr)
-            forecasts = predict_with(predictor, history, end=train_end + pd.Timedelta(prediction_length, unit="D"), freq=self.config.get("freq", "D"), num_samples=self.num_samples)
-            mu, lo, hi = forecast_to_dfs(forecasts, list(history.columns), train_end + pd.Timedelta(1, unit="D"), train_end + pd.Timedelta(prediction_length, unit="D"), self.config.get("freq", "D"), self.coverage_level)
+            forecasts = predict_with(
+                predictor,
+                history,
+                end=train_end + pd.Timedelta(prediction_length, unit="D"),
+                freq=self.config.get("freq", "D"),
+                num_samples=self.num_samples,
+            )
+            mu, lo, hi = forecast_to_dfs(
+                forecasts,
+                list(history.columns),
+                train_end + pd.Timedelta(1, unit="D"),
+                train_end + pd.Timedelta(prediction_length, unit="D"),
+                self.config.get("freq", "D"),
+                self.coverage_level,
+            )
             truth = history.tail(prediction_length).copy()
             truth.index = mu.index
             metrics = evaluate_per_series(truth, mu, lo, hi, coverage_level=self.coverage_level)
@@ -84,9 +101,21 @@ class DeepARForecaster(BaseForecaster):
         history: pd.DataFrame,
         train_end: pd.Timestamp | None = None,
         prediction_length: int | None = None,
+        actual: pd.DataFrame | None = None,
         **_,
     ) -> "DeepARForecaster":
+        """``actual`` (full series through the prediction end-date) is required
+        for correct prediction. DeepAR is *trained* on ``history`` (≤ train_end);
+        ``actual`` is only used at predict time so GluonTS can identify the
+        forecast horizon (the last ``prediction_length`` of ``actual``)."""
         self._history = history
+        self._actual = actual if actual is not None else history
+        if actual is None:
+            log.warning(
+                "DeepARForecaster.fit() called without `actual=` — falling back to "
+                "history. Forecast horizon will be the wrong window unless the caller "
+                "passes the full series through the prediction end-date."
+            )
         self._train_end = pd.Timestamp(train_end) if train_end is not None else history.index.max()
         if prediction_length is None:
             raise ValueError("DeepAR.fit() requires prediction_length (matches forecast horizon).")
@@ -104,10 +133,22 @@ class DeepARForecaster(BaseForecaster):
         return self
 
     def predict(self, start: pd.Timestamp, end: pd.Timestamp, freq: str = "D") -> ForecastResult:
-        if self._predictor is None or self._history is None:
+        if self._predictor is None or self._history is None or self._actual is None:
             raise RuntimeError("Call fit() first.")
+
+        end_ts = pd.Timestamp(end)
+        if self._actual.index.max() < end_ts:
+            raise ValueError(
+                f"`actual` ends at {self._actual.index.max().date()} but predict was "
+                f"asked for {end_ts.date()}. Pass the full series through ``end`` to "
+                "fit() so GluonTS can correctly identify the forecast horizon."
+            )
+
+        # Pass series ≤ end (= test_end). The trained predictor's
+        # prediction_length determines the strip length; with end-aligned
+        # series, the stripped portion is exactly the test window.
         forecasts = predict_with(
-            self._predictor, self._history, end=end, freq=freq, num_samples=self.num_samples
+            self._predictor, self._actual, end=end, freq=freq, num_samples=self.num_samples
         )
         mu, lo, hi = forecast_to_dfs(forecasts, list(self._history.columns), start, end, freq, self.coverage_level)
         return ForecastResult(mu=mu, lower=lo, upper=hi, coverage_level=self.coverage_level)

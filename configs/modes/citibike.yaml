@@ -5,7 +5,7 @@ weekday_only: false
 # Citibike tunes on the 3 months immediately preceding the policy, not the
 # year-displaced Jan–Apr window used for bus/subway.
 windows:
-  validation:
+  val:
     train_end:  "2024-09-30"
     test_start: "2024-10-01"
     test_end:   "2025-01-04"

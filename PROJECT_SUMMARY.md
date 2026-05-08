@@ -99,7 +99,7 @@ PCN ships in two flavours (`MultiLayerPCN` unidirectional with iterative refinem
 
 A factory — `nyc_cp.models.build_forecaster(model_cfg)` — instantiates the right class. Imports are lazy: ARIMA does not pull in GluonTS, PCN does not pull in Prophet, etc.
 
-CLI: `python -m scripts.train_forecast --mode <mode> --model <model> --window <validation|test> [--direction O|D]`. It saves the `mu / lower / upper` triplet plus a per-series evaluation table.
+CLI: `python -m scripts.train_forecast --mode <mode> --model <model> --window <val|test> [--direction O|D]`. (`--window validation` is accepted as an alias for `val`.) It saves the `mu / lower / upper` triplet plus a per-series evaluation table.
 
 ---
 

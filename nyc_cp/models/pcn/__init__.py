@@ -1,4 +1,4 @@
 from nyc_cp.models.pcn.forecaster import PCNForecaster
-from nyc_cp.models.pcn.network import MultiLayerPCN, MultiLayerPCNBi
+from nyc_cp.models.pcn.network import MultiLayerPCN, PCNLayer
 
-__all__ = ["PCNForecaster", "MultiLayerPCN", "MultiLayerPCNBi"]
+__all__ = ["PCNForecaster", "MultiLayerPCN", "PCNLayer"]

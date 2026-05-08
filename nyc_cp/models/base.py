@@ -45,6 +45,7 @@ class BaseForecaster(ABC):
     """Common interface for ARIMA, Prophet, DeepAR, and PCN."""
 
     name: str = "base"
+    supports_checkpoints: bool = False
 
     def __init__(self, config: dict[str, Any]):
         self.config = config
@@ -68,3 +69,24 @@ class BaseForecaster(ABC):
     ) -> ForecastResult:
         self.fit(history, **fit_kwargs)
         return self.predict(start, end, freq=freq)
+
+    def save_checkpoint(self, path: Path) -> None:
+        """Persist trained model state so a future run can skip ``fit()``.
+
+        Override in subclasses that support it; opt in via
+        ``supports_checkpoints = True`` so the CLI knows whether to offer
+        ``--from-checkpoint`` for this model.
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not support checkpointing.")
+
+    def load_checkpoint(
+        self,
+        path: Path,
+        history: pd.DataFrame,
+        train_end: pd.Timestamp,
+        prediction_length: int,
+    ) -> "BaseForecaster":
+        """Restore trained state from disk. ``history`` must be the same
+        date-filtered frame that was passed to the original ``fit()`` so
+        ``predict()`` sees the right tail."""
+        raise NotImplementedError(f"{type(self).__name__} does not support checkpointing.")

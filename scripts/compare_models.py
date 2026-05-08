@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 from nyc_cp.analysis.effects import load_forecast_triplet
-from nyc_cp.config import Direction, get_window, load_mode, load_paths, output_dir
+from nyc_cp.config import Direction, get_window, load_mode, load_paths, normalize_window_name, output_dir
 from nyc_cp.data import load_actual
 from nyc_cp.evaluation.metrics import evaluate_per_series
 from nyc_cp.utils import setup_logging
@@ -31,7 +31,7 @@ log = logging.getLogger("compare_models")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
-    p.add_argument("--window", required=True, choices=["validation", "test"])
+    p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D"], default="all")
     p.add_argument("--models", nargs="+", default=["arima", "prophet", "deepar", "pcn"])
     p.add_argument("--coverage-level", type=float, default=0.9)
@@ -40,6 +40,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.window = normalize_window_name(args.window)
     paths = load_paths()
     setup_logging(f"compare_{args.mode}_{args.window}", log_root=paths["log_root"])
 

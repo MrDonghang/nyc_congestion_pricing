@@ -32,7 +32,7 @@ import pandas as pd
 from nyc_cp.analysis import demographics
 from nyc_cp.analysis.causal import run_spatial_regression, run_tree_models, stepwise_vif_filter
 from nyc_cp.analysis.geospatial import map_units_to_tracts
-from nyc_cp.config import load_paths, output_dir
+from nyc_cp.config import load_paths, normalize_window_name, output_dir
 from nyc_cp.utils import setup_logging
 
 log = logging.getLogger("geospatial_analysis")
@@ -42,7 +42,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike"])
     p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn"])
-    p.add_argument("--window", required=True, choices=["validation", "test"])
+    p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D"], default="all")
     p.add_argument("--y-col", default="att_mean", help="Tract-level outcome column for regressions.")
     p.add_argument("--vif-threshold", type=float, default=20.0)
@@ -108,6 +108,7 @@ def _tract_effects(args, paths, geo) -> "geopandas.GeoDataFrame":
 
 def main() -> None:
     args = parse_args()
+    args.window = normalize_window_name(args.window)
     paths = load_paths()
     setup_logging(f"geospatial_{args.mode}_{args.model}_{args.window}", log_root=paths["log_root"])
 

@@ -1,0 +1,5 @@
+# GPU 1 (re-launch after removing replica) — bus only
+bus all pcn val
+bus all pcn test
+bus all deepar val
+bus all deepar test

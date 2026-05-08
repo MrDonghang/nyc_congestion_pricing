@@ -21,7 +21,8 @@ dependencies = [
     "joblib",
     # Forecasting
     "torch",
-    "gluonts",
+    "lightning",                 # required by gluonts.torch.model.deepar
+    "gluonts[torch]",            # [torch] extra also installs lightning, kept explicit for clarity
     "prophet",
     "pmdarima",
     "statsmodels",

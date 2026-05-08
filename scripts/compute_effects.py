@@ -31,7 +31,7 @@ from nyc_cp.analysis.effects import (
     summarize_over_time,
     summarize_overall,
 )
-from nyc_cp.config import get_window, load_mode, load_paths, output_dir
+from nyc_cp.config import get_window, load_mode, load_paths, normalize_window_name, output_dir
 from nyc_cp.data import load_actual
 from nyc_cp.utils import setup_logging
 
@@ -49,7 +49,7 @@ def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
     p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn"])
-    p.add_argument("--window", required=True, choices=["validation", "test"])
+    p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D"], default="all")
     p.add_argument("--id-col", default=None, help="Override the unit-id column name (defaults per mode).")
     return p.parse_args()
@@ -57,6 +57,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.window = normalize_window_name(args.window)
     paths = load_paths()
     setup_logging(f"effects_{args.mode}_{args.model}_{args.window}", log_root=paths["log_root"])
 
@@ -74,13 +75,14 @@ def main() -> None:
 
     common = list(actual.columns.intersection(result.mu.columns))
     log.info("Common series after alignment: %d", len(common))
+    cov = result.coverage_level
     long = build_long_df(
         actual[common], result.mu[common], result.lower[common], result.upper[common], id_col=id_col, columns=common
     )
-    eff = compute_effects(long, id_col=id_col)
-    unit = summarize_by_unit(eff, id_col=id_col)
-    daily = summarize_over_time(eff)
-    overall = summarize_overall(unit, id_col=id_col)
+    eff = compute_effects(long, id_col=id_col, coverage_level=cov)
+    unit = summarize_by_unit(eff, id_col=id_col, coverage_level=cov)
+    daily = summarize_over_time(eff, coverage_level=cov)
+    overall = summarize_overall(unit, id_col=id_col, coverage_level=cov)
 
     eff_dir = out_dir / "effects"
     eff_dir.mkdir(exist_ok=True)

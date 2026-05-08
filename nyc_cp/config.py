@@ -67,7 +67,18 @@ class Window:
         return f"{self.train_end}_to_{self.test_end}"
 
 
-def get_window(mode: str, name: Literal["validation", "test"], mode_cfg: dict | None = None) -> Window:
+def normalize_window_name(name: str) -> str:
+    """Accept ``val`` and ``validation`` interchangeably; canonicalise to ``val``.
+
+    The mode YAMLs and saved-forecast filenames use the short form ``val`` (to
+    match the original repo's ``*_val_*`` naming); the CLI also accepts the
+    full word ``validation`` because it reads more clearly in scripts.
+    """
+    return "val" if name == "validation" else name
+
+
+def get_window(mode: str, name: str, mode_cfg: dict | None = None) -> Window:
+    name = normalize_window_name(name)
     mode_cfg = mode_cfg or load_mode(mode)
     w = mode_cfg["windows"][name]
     return Window(train_end=w["train_end"], test_start=w["test_start"], test_end=w["test_end"])

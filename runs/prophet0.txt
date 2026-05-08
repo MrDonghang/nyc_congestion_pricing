@@ -1,0 +1,7 @@
+# CPU prophet 0 — bus + subway
+bus all prophet val
+bus all prophet test
+subway O prophet val
+subway O prophet test
+subway D prophet val
+subway D prophet test

@@ -3,7 +3,7 @@
 
 raw_root:    /public_dataset/donghang/nyc_congestion_pricing/raw_data
 data_root:   /public_dataset/donghang/nyc_congestion_pricing/data_processed
-output_root: /public_dataset/donghang/nyc_congestion_pricing/output
+output_root: /public_dataset/donghang/nyc_congestion_pricing/output_new
 geo_root:    geo_data
 log_root:    logs
 

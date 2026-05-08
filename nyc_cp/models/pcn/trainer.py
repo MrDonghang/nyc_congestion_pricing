@@ -1,9 +1,13 @@
-"""PCN training loop.
+"""PCN training loop with hierarchical free-energy regulariser.
 
 Splits a single z-scored series into rolling input/target windows, then trains
-with Gaussian NLL plus two regularisers:
-  * ``alpha`` weight on  ``(mu[0] - x[-1])^2``    — continuity at the boundary
-  * ``beta``  weight on  ``MSE(diff(mu), diff(y))`` — first-derivative smoothness
+with four loss terms:
+  * Gaussian NLL on (mu, sigma)
+  * ``alpha`` weight on  ``(mu[0] - x[-1])^2``      — boundary continuity
+  * ``beta``  weight on  ``SmoothL1(diff(mu), diff(y))`` — first-derivative match
+  * ``gamma`` weight on  ``mean(layer_errors^2)``    — hierarchical free energy
+
+Mirrors ``pcn_model_new.py`` from the original research repo.
 """
 
 from __future__ import annotations
@@ -23,8 +27,9 @@ class TrainConfig:
     batch_size: int = 32
     lr: float = 1e-3
     weight_decay: float = 1e-4
-    alpha: float = 10.0
-    beta: float = 0.5
+    alpha: float = 10.0    # boundary continuity weight
+    beta: float = 0.5      # first-derivative match weight
+    gamma: float = 0.1     # hierarchical free-energy weight
     test_split: float = 0.2
     val_split: float = 0.1
     patience: int = 10
@@ -68,6 +73,7 @@ def train_pcn(
     """Fit ``model`` on a single z-scored ``series``. Returns final epoch's avg loss."""
     x, y = make_windows(series, batch_length, pred_length)
 
+    # Mirror the original: split off test, then val, train on what's left.
     train_x, _, train_y, _ = train_test_split(x, y, test_size=cfg.test_split, shuffle=False)
     train_x, _, train_y, _ = train_test_split(train_x, train_y, test_size=cfg.val_split, shuffle=False)
 
@@ -75,34 +81,35 @@ def train_pcn(
 
     model.to(device)
     optim = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
-    derivative_loss = nn.SmoothL1Loss()
+    smooth_l1 = nn.SmoothL1Loss()
     stopper = _EarlyStopping(patience=cfg.patience)
 
     last_avg = float("nan")
-    for epoch in range(cfg.epochs):
+    for _epoch in range(cfg.epochs):
         model.train()
         total = 0.0
         for xb, yb in loader:
-            xb = xb.unsqueeze(0).to(device)  # (1, B, L)
-            yb = yb.unsqueeze(0).to(device)
+            xb = xb.to(device)                       # (B, L)
+            yb = yb.to(device)                       # (B, pred_length)
 
-            xm = xb.mean(dim=2, keepdim=True)
-            xs = xb.std(dim=2, keepdim=True) + 1e-6
+            xm = xb.mean(dim=1, keepdim=True)        # (B, 1)
+            xs = xb.std(dim=1, keepdim=True) + 1e-6
             xn = (xb - xm) / xs
 
-            mu_n, sigma_n = model(xn.float())
-            xs_e = xs.expand(1, xb.shape[1], pred_length)
-            xm_e = xm.expand(1, xb.shape[1], pred_length)
+            mu_n, sigma_n, layer_errors = model(xn.float())
+
+            xs_e = xs.expand(xb.shape[0], pred_length)
+            xm_e = xm.expand(xb.shape[0], pred_length)
             mu = mu_n * xs_e + xm_e
             sigma = sigma_n * xs_e
 
             nll = (torch.log(sigma) + 0.5 * ((yb - mu) / sigma) ** 2).mean()
-            constraint = ((mu[:, :, 0] - xb[:, :, -1]) ** 2).mean()
-            d_pred = mu[:, 1:] - mu[:, :-1]
-            d_true = yb[:, 1:] - yb[:, :-1]
-            deriv = derivative_loss(d_pred, d_true)
+            continuity = ((mu[:, 0] - xb[:, -1]) ** 2).mean()
+            slope = smooth_l1(mu[:, 1:] - mu[:, :-1], yb[:, 1:] - yb[:, :-1])
+            hier = torch.stack([(e ** 2).mean() for e in layer_errors]).mean()
 
-            loss = nll + cfg.alpha * constraint + cfg.beta * deriv
+            loss = nll + cfg.alpha * continuity + cfg.beta * slope + cfg.gamma * hier
+
             optim.zero_grad()
             loss.backward()
             optim.step()
@@ -112,4 +119,5 @@ def train_pcn(
         stopper.step(total)
         if stopper.stop:
             break
+
     return last_avg

@@ -53,10 +53,11 @@ python -m scripts.process_data  --mode subway   --od-estimate ...        --hourl
 python -m scripts.process_data  --mode citibike --raw-dir ...            --census-shp ...
 python -m scripts.process_data  --mode replica  --raw-dir ...            --geo-csv ...
 
-# 2. Train + forecast (validation tunes; test is the counterfactual horizon)
+# 2. Train + forecast (val tunes; test is the counterfactual horizon)
+#    --window accepts val / validation / test  (val and validation are aliases)
 python -m scripts.train_forecast --mode bus      --model pcn     --window test
 python -m scripts.train_forecast --mode subway   --model deepar  --window test --direction O
-python -m scripts.train_forecast --mode citibike --model prophet --window test --direction D
+python -m scripts.train_forecast --mode citibike --model prophet --window val  --direction D
 
 # 3. Compare model accuracy
 python -m scripts.compare_models  --mode bus --window test
@@ -101,9 +102,9 @@ nyc_congestion_pricing/
 | citibike  | daily     | O / D       | Citibike trip-data zips, joined to census tract |
 | replica   | weekly    | O / D       | Replica weekly trip-count zips                  |
 
-Forecast windows are defined per-mode (see `configs/modes/<mode>.yaml`) because citibike and replica do not share the year-displaced validation window that bus/subway use.
+Forecast windows are defined per-mode (see `configs/modes/<mode>.yaml`) because citibike and replica do not share the year-displaced val window that bus/subway use. The CLI flag `--window` accepts `val` (or `validation` as an alias) and `test`; output filenames use the short form `_val_` / `_test_`.
 
-| Mode      | Validation                              | Test (counterfactual)                   |
+| Mode      | val                                     | test (counterfactual)                   |
 |-----------|-----------------------------------------|-----------------------------------------|
 | bus       | 2024-01-05 → 2024-04-30                 | 2025-01-05 → 2025-04-30                 |
 | subway    | 2024-01-05 → 2024-04-30                 | 2025-01-05 → 2025-04-30                 |
