@@ -41,19 +41,31 @@ log = logging.getLogger("geospatial_analysis")
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike"])
-    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts"])
+    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts", "chronos_qrcal", "timesfm_qrcal"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D"], default="all")
-    p.add_argument("--y-col", default="att_mean", help="Tract-level outcome column for regressions.")
+    p.add_argument("--y-col", default="att", help="Tract-level outcome column for regressions.")
     p.add_argument("--vif-threshold", type=float, default=20.0)
+    p.add_argument(
+        "--skip-regression",
+        action="store_true",
+        help="Stop after writing tract_effects.geojson; skip spatial OLS/ML and tree models.",
+    )
     return p.parse_args()
 
 
 def _load_geo(geo_root: Path):
     import geopandas as gpd
 
+    # The tract shapefile ships with lowercase ``geoid``; downstream code
+    # (map_units_to_tracts, the citibike merge) defaults to ``GEOID``.
+    # Normalize once at load so every consumer sees the same name.
+    tracts = gpd.read_file(geo_root / "NYC_Census_Tracts_2020" / "NYC_Census_Tracts_2020.shp")
+    if "GEOID" not in tracts.columns:
+        tracts = tracts.rename(columns={c: "GEOID" for c in tracts.columns if c.lower() == "geoid"})
+
     return {
-        "tracts": gpd.read_file(geo_root / "NYC_Census_Tracts_2020" / "NYC_Census_Tracts_2020.shp"),
+        "tracts": tracts,
         "puma": gpd.read_file(geo_root / "NYC_PUMA" / "NYC_Public_Use_Microdata_Areas_PUMAs_2010.shp"),
         "crz": gpd.read_file(geo_root / "nyc_cp_boundary_poly_json.geojson"),
         "demographics": geo_root / "nyc_census_tracts.geojson",
@@ -90,18 +102,40 @@ def _tract_effects(args, paths, geo) -> "geopandas.GeoDataFrame":
     if args.mode == "subway":
         stations = gpd.read_file(geo["subway_stations"])
         unit = unit.rename(columns={unit.columns[0]: "station_id"}) if unit.columns[0] != "station_id" else unit
+        # The MTA stations geojson stores station_id as int; the unit-effects csv
+        # stores it as str. Coerce both to str so the merge inside
+        # map_units_to_tracts succeeds.
+        stations["station_id"] = stations["station_id"].astype(str)
+        unit["station_id"] = unit["station_id"].astype(str)
         return map_units_to_tracts(
             stations, geo["tracts"], unit, join_col_units="station_id", join_col_effects="station_id", metric_cols=metric_cols
         )
 
     if args.mode == "citibike":
-        # citibike units are already tract-indexed; just merge directly to tract polygons.
+        # citibike units are tract-indexed by *integer position*, not FIPS GEOID.
+        # The processing step (nyc_cp.data.citibike) builds an index over 6-digit
+        # ct2020 codes (which are not unique across NYC's 5 boroughs — e.g. 000100
+        # exists in Manhattan, Brooklyn, and Bronx), so 1530 indices cover ~2325
+        # tracts. Recover the mapping from the pkl saved at processing time and
+        # merge on ``ct2020``: a single citibike tract_id thus paints every
+        # borough's tract that shares the ct2020 with the same ATT value, which
+        # is the honest rendering given the lossy upstream index.
+        import pickle
         unit = unit.rename(columns={unit.columns[0]: "tract_id"}) if unit.columns[0] != "tract_id" else unit
+        pkl_path = Path(paths["data_root"]) / "citibike" / "census" / "censustract_idx_mapping.pkl"
+        if not pkl_path.exists():
+            raise SystemExit(
+                f"citibike index mapping pkl not found at {pkl_path}. "
+                "Re-run nyc_cp.data.citibike.process to regenerate."
+            )
+        with open(pkl_path, "rb") as f:
+            idx_map = pickle.load(f)            # ct2020 (str) -> idx (int)
+        inv = {v: k for k, v in idx_map.items()}  # idx -> ct2020
+        unit["ct2020"] = unit["tract_id"].astype(int).map(inv)
+        unit = unit.dropna(subset=["ct2020"])
         tracts = geo["tracts"].copy()
-        if "GEOID" not in tracts.columns:
-            tracts = tracts.rename(columns={c: "GEOID" for c in tracts.columns if c.lower() == "geoid"})
-        unit["tract_id"] = unit["tract_id"].astype(str)
-        return tracts.merge(unit.rename(columns={c: f"{c}_mean" for c in metric_cols}), left_on="GEOID", right_on="tract_id", how="left")
+        tracts["ct2020"] = tracts["ct2020"].astype(str)
+        return tracts.merge(unit, on="ct2020", how="left")
 
     raise SystemExit(f"Unsupported mode for spatial mapping: {args.mode}")
 
@@ -126,6 +160,10 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     tracts_with_dem.to_file(out_dir / "tract_effects.geojson", driver="GeoJSON")
     log.info("Wrote %s", out_dir / "tract_effects.geojson")
+
+    if args.skip_regression:
+        log.info("--skip-regression set; stopping before OLS/ML and tree models.")
+        return
 
     # Use the standard variable groups, then VIF-filter.
     x_cols = sum([demographics.GROUPS[g] for g in ["demographics", "race_ethnicity", "economics", "travel", "education", "housing"]], [])

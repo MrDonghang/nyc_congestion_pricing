@@ -4,8 +4,12 @@
   as inside / partially-inside / outside the Congestion Relief Zone polygon.
 * :func:`map_units_to_tracts` — bring per-unit ATT (e.g. per bus route) into
   census-tract space via spatial join + averaging.
-* :func:`plot_choropleth`, :func:`plot_significance_calendar`,
-  :func:`plot_effects_over_time` — three figures used throughout the report.
+* :func:`plot_choropleth`, :func:`plot_unit_effects`,
+  :func:`plot_significance_calendar`, :func:`plot_effects_over_time` —
+  figures used throughout the report. ``plot_choropleth`` aggregates to
+  tract polygons, ``plot_unit_effects`` colours raw units (bus polylines /
+  subway points) by per-unit ATT — useful when tract aggregation hides
+  inter-unit variation.
 
 All inputs are projected to ``EPSG:2263`` (NY State Plane, feet) for
 area-correct geometry.
@@ -122,11 +126,22 @@ def plot_choropleth(
     cmap: str = "Reds",
     legend_label: str | None = None,
     quantile_clip: tuple[float, float] = (0.02, 0.98),
+    diverging: bool | None = None,
+    center: float = 0.0,
     ax=None,
     figsize=(10, 10),
     dpi: int = 300,
 ):
-    """Choropleth of ``column`` clipped to per-quantile vmin/vmax."""
+    """Choropleth of ``column`` clipped to per-quantile vmin/vmax.
+
+    For diverging quantities (signed ATT), pass ``diverging=True`` so the
+    colormap is normalised with ``TwoSlopeNorm(vcenter=center)`` — that way
+    ``center`` (default 0) is always the white midpoint regardless of how
+    skewed the value distribution is. Without this, a heavy-negative tail
+    pushes the white midpoint deep into the negative range and most slightly-
+    negative tracts appear in the *positive* (red) half of the colour bar.
+    Auto-detected when ``diverging is None`` and any value crosses ``center``.
+    """
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
     else:
@@ -138,12 +153,147 @@ def plot_choropleth(
 
     missing = gdf[gdf[column].isna()]
     valid = gdf[~gdf[column].isna()]
+    if valid.empty:
+        # All NaN — usually a broken upstream join. Render only the missing
+        # polygons so the user can see the geometry without crashing.
+        if not missing.empty:
+            missing.plot(ax=ax, color="lightgrey", linewidth=0.4)
+        if crz_polygon is not None:
+            crz_polygon.to_crs(TARGET_CRS).boundary.plot(ax=ax, color="red", linewidth=2)
+        ax.set_axis_off()
+        ax.set_title(f"{column} — all values missing", fontsize=11, color="red")
+        return fig, ax
     vals = valid[column].astype(float)
-    vmin, vmax = np.nanpercentile(vals, [quantile_clip[0] * 100, quantile_clip[1] * 100])
+    pct = np.nanpercentile(vals, [quantile_clip[0] * 100, quantile_clip[1] * 100])
+    vmin, vmax = float(pct[0]), float(pct[1])
+
+    if diverging is None:
+        diverging = bool((vals.min() < center) and (vals.max() > center))
+
+    plot_kwargs = dict(column=column, cmap=cmap, linewidth=0.4, legend=True)
+    if diverging:
+        from matplotlib.colors import TwoSlopeNorm
+
+        # Symmetric extent around ``center`` so red/blue intensity is comparable.
+        half = max(abs(vmin - center), abs(vmax - center))
+        if half == 0:
+            half = 1.0  # degenerate; avoid TwoSlopeNorm raising on equal bounds
+        plot_kwargs["norm"] = TwoSlopeNorm(vcenter=center, vmin=center - half, vmax=center + half)
+    else:
+        plot_kwargs["vmin"], plot_kwargs["vmax"] = vmin, vmax
 
     if not missing.empty:
         missing.plot(ax=ax, color="lightgrey", linewidth=0.4)
-    valid.plot(ax=ax, column=column, cmap=cmap, linewidth=0.4, legend=True, vmin=vmin, vmax=vmax)
+    valid.plot(ax=ax, **plot_kwargs)
+
+    if crz_polygon is not None:
+        crz_polygon.to_crs(TARGET_CRS).boundary.plot(ax=ax, color="red", linewidth=2)
+
+    ax.set_axis_off()
+    if legend_label:
+        cbar = fig.axes[-1]
+        cbar.set_ylabel(legend_label, rotation=270, labelpad=18)
+    return fig, ax
+
+
+def plot_unit_effects(
+    units_gdf,
+    effects_df: pd.DataFrame,
+    join_col: str,
+    value_col: str = "att",
+    crz_polygon=None,
+    base_layer=None,
+    cmap: str = "RdBu_r",
+    legend_label: str | None = None,
+    quantile_clip: tuple[float, float] = (0.02, 0.98),
+    diverging: bool | None = None,
+    center: float = 0.0,
+    point_size: float = 30.0,
+    point_size_by_abs: bool = False,
+    line_width: float = 2.0,
+    ax=None,
+    figsize=(11, 11),
+    dpi: int = 300,
+):
+    """Map per-unit ATT directly onto unit geometries (bus polylines / subway points).
+
+    Avoids the tract-aggregation step in :func:`plot_choropleth`, so each
+    individual route or station is visible. Use ``base_layer`` to pass a
+    grey background (e.g. census tract polygons or borough boundaries).
+
+    Parameters
+    ----------
+    units_gdf : GeoDataFrame
+        Geometry per unit (rows may repeat per direction; merge handles it).
+    effects_df : DataFrame
+        Per-unit metrics, e.g. the ``*_unit.csv`` written by ``compute_effects``.
+    join_col : str
+        Column name shared by both frames (``route_id`` or ``station_id``).
+    value_col : str
+        Column in ``effects_df`` to colour by (default ``"att"``).
+    diverging : bool or None
+        ``True`` → use ``TwoSlopeNorm(vcenter=center)``. Auto-detect when None.
+    point_size_by_abs : bool
+        Subway-only convenience: scale Point markers by ``|value|`` so big
+        effects look big. Has no effect on line geometries.
+    """
+    from matplotlib.colors import TwoSlopeNorm
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    else:
+        fig = ax.figure
+
+    if value_col not in effects_df.columns:
+        raise KeyError(f"Column {value_col!r} not in effects_df.")
+    if join_col not in units_gdf.columns:
+        raise KeyError(f"Column {join_col!r} not in units_gdf.")
+
+    # Coerce join keys to a common dtype (handles int vs str id mismatches).
+    units = units_gdf.copy()
+    eff = effects_df.copy()
+    units[join_col] = units[join_col].astype(str)
+    eff[join_col] = eff[join_col].astype(str)
+    merged = units.merge(eff[[join_col, value_col]], on=join_col, how="left")
+
+    merged = merged.to_crs(TARGET_CRS)
+    if base_layer is not None:
+        base_layer.to_crs(TARGET_CRS).plot(ax=ax, color="whitesmoke", edgecolor="lightgray", linewidth=0.3)
+
+    valid = merged[~merged[value_col].isna()]
+    if valid.empty:
+        if crz_polygon is not None:
+            crz_polygon.to_crs(TARGET_CRS).boundary.plot(ax=ax, color="red", linewidth=2)
+        ax.set_axis_off()
+        ax.set_title(f"{value_col} — all values missing", fontsize=11, color="red")
+        return fig, ax
+    vals = valid[value_col].astype(float)
+    pct = np.nanpercentile(vals, [quantile_clip[0] * 100, quantile_clip[1] * 100])
+    vmin, vmax = float(pct[0]), float(pct[1])
+
+    if diverging is None:
+        diverging = bool((vals.min() < center) and (vals.max() > center))
+    if diverging:
+        half = max(abs(vmin - center), abs(vmax - center)) or 1.0
+        norm = TwoSlopeNorm(vcenter=center, vmin=center - half, vmax=center + half)
+        plot_kwargs = {"norm": norm}
+    else:
+        plot_kwargs = {"vmin": vmin, "vmax": vmax}
+
+    geom_kind = valid.geometry.geom_type.iloc[0]
+    if geom_kind in ("Point", "MultiPoint"):
+        if point_size_by_abs:
+            mag = vals.abs()
+            mag_max = mag.max() or 1.0
+            sizes = (point_size * 0.3) + (mag / mag_max) * point_size * 2.0
+        else:
+            sizes = point_size
+        valid.plot(ax=ax, column=value_col, cmap=cmap, markersize=sizes, legend=True,
+                   edgecolor="black", linewidth=0.4, **plot_kwargs)
+    elif geom_kind in ("LineString", "MultiLineString"):
+        valid.plot(ax=ax, column=value_col, cmap=cmap, linewidth=line_width, legend=True, **plot_kwargs)
+    else:
+        valid.plot(ax=ax, column=value_col, cmap=cmap, linewidth=0.4, legend=True, **plot_kwargs)
 
     if crz_polygon is not None:
         crz_polygon.to_crs(TARGET_CRS).boundary.plot(ax=ax, color="red", linewidth=2)

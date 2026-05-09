@@ -122,9 +122,9 @@ def run_tree_models(
     X_tr, X_te, y_tr, y_te = train_test_split(X, y, test_size=test_size, random_state=random_state)
 
     models = {
-        "random_forest": RandomForestRegressor(n_estimators=400, random_state=random_state, n_jobs=-1),
-        "xgboost": XGBRegressor(n_estimators=400, random_state=random_state, n_jobs=-1, verbosity=0),
-        "lightgbm": LGBMRegressor(n_estimators=400, random_state=random_state, n_jobs=-1, verbose=-1),
+        "random_forest": RandomForestRegressor(n_estimators=400, random_state=random_state, n_jobs=8),
+        "xgboost": XGBRegressor(n_estimators=400, random_state=random_state, n_jobs=8, verbosity=0),
+        "lightgbm": LGBMRegressor(n_estimators=400, random_state=random_state, n_jobs=8, verbose=-1),
     }
     rows = []
     for name, m in models.items():
