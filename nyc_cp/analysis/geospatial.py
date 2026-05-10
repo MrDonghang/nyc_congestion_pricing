@@ -305,6 +305,285 @@ def plot_unit_effects(
     return fig, ax
 
 
+def plot_unit_effects_by_significance(
+    units_gdf,
+    effects_df: pd.DataFrame,
+    join_col: str,
+    crz_polygon=None,
+    base_layer=None,
+    att_col: str = "att",
+    signif_col: str = "att_signif",
+    point_size: float = 35.0,
+    point_size_by_abs: bool = True,
+    line_width: float = 2.5,
+    ax=None,
+    figsize=(11, 11),
+    dpi: int = 300,
+    title: str | None = None,
+):
+    """Categorical map: each unit colored by SIGN × SIGNIFICANCE of its ATT.
+
+    Unlike :func:`plot_unit_effects` (which fades color smoothly across all
+    units regardless of confidence), this distinguishes:
+
+    * **red**  — significantly positive (att > 0 AND ``signif_col`` True)
+    * **blue** — significantly negative (att < 0 AND ``signif_col`` True)
+    * **grey** — not significant (CI on ATT covers zero)
+    * **white** — missing (no ATT could be computed)
+
+    "Significant" uses the per-unit ATT 90% CI (``att_signif`` from
+    ``compute_effects``), which is the proper test for *whether the unit's
+    effect is detectably non-zero across the test horizon* — strictly
+    stronger than just thresholding on the sign of the point estimate.
+    """
+    from matplotlib.colors import to_rgba
+    from matplotlib.lines import Line2D
+    import geopandas as gpd
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize, dpi=dpi)
+    else:
+        fig = ax.figure
+
+    units = units_gdf.copy()
+    eff = effects_df.copy()
+    units[join_col] = units[join_col].astype(str)
+    eff[join_col] = eff[join_col].astype(str)
+    keep_cols = [join_col, att_col]
+    if signif_col in eff.columns:
+        keep_cols.append(signif_col)
+    merged = units.merge(eff[keep_cols], on=join_col, how="left").to_crs(TARGET_CRS)
+
+    # Categorize
+    sig = merged[signif_col].fillna(False).astype(bool) if signif_col in merged.columns else pd.Series(False, index=merged.index)
+    pos = (merged[att_col] > 0) & sig
+    neg = (merged[att_col] < 0) & sig
+    nonsig = merged[att_col].notna() & ~sig
+    missing = merged[att_col].isna()
+
+    if base_layer is not None:
+        base_layer.to_crs(TARGET_CRS).plot(ax=ax, color="whitesmoke",
+                                           edgecolor="lightgray", linewidth=0.3)
+
+    geom_kind = merged.geometry.geom_type.iloc[0]
+
+    def _sized(s):
+        if not point_size_by_abs:
+            return point_size
+        mag = s[att_col].abs()
+        m_max = mag.max() or 1.0
+        return (point_size * 0.3) + (mag / m_max) * point_size * 2.0
+
+    if geom_kind in ("Point", "MultiPoint"):
+        if missing.any():
+            merged[missing].plot(ax=ax, color="white", markersize=point_size * 0.4,
+                                 edgecolor="lightgray", linewidth=0.3)
+        if nonsig.any():
+            merged[nonsig].plot(ax=ax, color="lightgrey", markersize=point_size * 0.5,
+                                edgecolor="dimgray", linewidth=0.3, alpha=0.7)
+        if neg.any():
+            merged[neg].plot(ax=ax, color="steelblue", markersize=_sized(merged[neg]),
+                             edgecolor="navy", linewidth=0.4, alpha=0.85)
+        if pos.any():
+            merged[pos].plot(ax=ax, color="firebrick", markersize=_sized(merged[pos]),
+                             edgecolor="darkred", linewidth=0.4, alpha=0.85)
+    elif geom_kind in ("LineString", "MultiLineString"):
+        if missing.any():
+            merged[missing].plot(ax=ax, color="white", linewidth=0.6)
+        if nonsig.any():
+            merged[nonsig].plot(ax=ax, color="lightgrey", linewidth=line_width * 0.5, alpha=0.7)
+        if neg.any():
+            merged[neg].plot(ax=ax, color="steelblue", linewidth=line_width, alpha=0.85)
+        if pos.any():
+            merged[pos].plot(ax=ax, color="firebrick", linewidth=line_width, alpha=0.85)
+    else:
+        # Polygons
+        cats = pd.Series("missing", index=merged.index)
+        cats[nonsig] = "not significant"; cats[neg] = "signif negative"; cats[pos] = "signif positive"
+        merged["_cat"] = cats
+        cmap = {"missing": "white", "not significant": "lightgrey",
+                "signif negative": "steelblue", "signif positive": "firebrick"}
+        for cat, color in cmap.items():
+            sub = merged[merged._cat == cat]
+            if not sub.empty:
+                sub.plot(ax=ax, color=color, edgecolor="white", linewidth=0.1, alpha=0.85)
+
+    if crz_polygon is not None:
+        crz_polygon.to_crs(TARGET_CRS).boundary.plot(ax=ax, color="black", linewidth=2)
+
+    ax.set_axis_off()
+
+    legend_elems = [
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="firebrick",
+               markeredgecolor="darkred", markersize=10,
+               label=f"Signif positive  (n={int(pos.sum())})"),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="steelblue",
+               markeredgecolor="navy", markersize=10,
+               label=f"Signif negative  (n={int(neg.sum())})"),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="lightgrey",
+               markeredgecolor="dimgray", markersize=8,
+               label=f"Not significant  (n={int(nonsig.sum())})"),
+    ]
+    if missing.any():
+        legend_elems.append(Line2D([0], [0], marker="o", color="w", markerfacecolor="white",
+                                   markeredgecolor="lightgray", markersize=6,
+                                   label=f"Missing  (n={int(missing.sum())})"))
+    ax.legend(handles=legend_elems, loc="upper left", frameon=True, fontsize=10)
+
+    if title:
+        ax.set_title(title, fontsize=12)
+    return fig, ax
+
+
+def summarize_effects_by_crz(
+    units_gdf,
+    effects_df: pd.DataFrame,
+    crz_polygon,
+    kind: Literal["routes", "tracts", "stations"],
+    join_col: str,
+    att_col: str = "att",
+    cum_effect_col: str = "cum_effect",
+    cum_cf_col: str = "cum_cf",
+    signif_col: str = "att_signif",
+) -> pd.DataFrame:
+    """One row per CRZ class: count of units, count signif +/-, mean ATT,
+    pooled cumulative ATT, and pooled relative effect = Σ cum_effect / Σ cum_cf.
+
+    Use this to check whether the policy effect is concentrated in CRZ-inside
+    units (the policy target) and whether the spatial story is compositional
+    (e.g. inside +X%, outside -Y%, average ≈ 0)."""
+    units = units_gdf.copy()
+    eff = effects_df.copy()
+    units[join_col] = units[join_col].astype(str)
+    eff[join_col] = eff[join_col].astype(str)
+    crz_in_target = crz_polygon.to_crs(TARGET_CRS) if hasattr(crz_polygon, "to_crs") else crz_polygon
+    units = classify_crz(units.to_crs(TARGET_CRS), crz_in_target, kind=kind)
+    cols = [join_col, att_col]
+    for c in (cum_effect_col, cum_cf_col, signif_col):
+        if c in eff.columns: cols.append(c)
+    merged = units.merge(eff[cols], on=join_col, how="left")
+
+    rows = []
+    for crz_class, grp in merged.groupby("crz_class"):
+        valid = grp[grp[att_col].notna()]
+        sig = valid[signif_col].fillna(False).astype(bool) if signif_col in valid.columns else pd.Series(False, index=valid.index)
+        pos = (valid[att_col] > 0) & sig
+        neg = (valid[att_col] < 0) & sig
+        row = {
+            "crz_class": crz_class,
+            "n_units": len(valid),
+            "n_signif_positive": int(pos.sum()),
+            "n_signif_negative": int(neg.sum()),
+            "n_not_signif": int(valid[att_col].notna().sum() - pos.sum() - neg.sum()),
+            "mean_att": float(valid[att_col].mean()) if len(valid) else float("nan"),
+            "median_att": float(valid[att_col].median()) if len(valid) else float("nan"),
+        }
+        if cum_effect_col in valid.columns and cum_cf_col in valid.columns:
+            cum_eff_sum = float(valid[cum_effect_col].sum())
+            cum_cf_sum = float(valid[cum_cf_col].sum())
+            row["total_cum_effect"] = cum_eff_sum
+            row["total_cum_cf"] = cum_cf_sum
+            row["pooled_relative_effect"] = cum_eff_sum / cum_cf_sum if cum_cf_sum else float("nan")
+        rows.append(row)
+    return pd.DataFrame(rows).sort_values("crz_class").reset_index(drop=True)
+
+
+def plot_trends_by_crz(
+    long_df: pd.DataFrame,
+    units_gdf,
+    crz_polygon,
+    kind: Literal["routes", "tracts", "stations"],
+    join_col: str,
+    title_prefix: str = "",
+    figsize=(13, 9),
+    dpi: int = 150,
+    line_colors: dict[str, str] | None = None,
+):
+    """Two-row figure: daily ATT (top) and cumulative ATT% (bottom), with one
+    line per CRZ class. Replaces the single-line ``plot_effects_over_time``
+    when you want to see Inside-vs-Outside dynamics.
+
+    Parameters
+    ----------
+    long_df : per-(date, unit) ATT panel from ``compute_effects`` _long.csv.
+              Must have columns: date, <join_col>, tau, cf_mean.
+    units_gdf : geometry per unit, indexed/keyed by ``join_col``.
+    crz_polygon : GeoSeries / GeoDataFrame with the CRZ polygon.
+    kind : "routes" (3-class) | "stations" (2-class) | "tracts" (2-class).
+    """
+    import geopandas as gpd
+
+    # Classify each unit into CRZ class
+    crz_in_target = crz_polygon.to_crs(TARGET_CRS) if hasattr(crz_polygon, "to_crs") else crz_polygon
+    units_classified = classify_crz(units_gdf.to_crs(TARGET_CRS), crz_in_target, kind=kind)
+    unit_to_class = dict(zip(units_classified[join_col].astype(str), units_classified["crz_class"]))
+
+    long = long_df.copy()
+    long[join_col] = long[join_col].astype(str)
+    long["crz_class"] = long[join_col].map(unit_to_class)
+    long = long.dropna(subset=["crz_class"])
+    long["date"] = pd.to_datetime(long["date"])
+
+    if line_colors is None:
+        if kind == "routes":
+            line_colors = {"fully_inside": "C3", "partially_inside": "C1", "fully_outside": "C0"}
+        else:
+            line_colors = {"Inside CRZ": "C3", "Outside CRZ": "C0"}
+
+    # Daily aggregate per (date, class): mean tau across units in that class
+    daily = (long.groupby(["date", "crz_class"], as_index=False)
+                  .agg(daily_mean_tau=("tau", "mean"),
+                       daily_se_tau=("tau", lambda s: float(s.std(ddof=1) / max(len(s), 1) ** 0.5)),
+                       n_units=("tau", "count")))
+
+    # Cumulative pooled relative effect per (date, class):
+    #   sum_units(cum_effect_to_date) / sum_units(cum_cf_to_date)
+    long_sorted = long.sort_values(["crz_class", join_col, "date"])
+    long_sorted["cum_eff_unit"] = long_sorted.groupby([join_col])["tau"].cumsum()
+    long_sorted["cum_cf_unit"]  = long_sorted.groupby([join_col])["cf_mean"].cumsum()
+    pooled = (long_sorted.groupby(["date", "crz_class"], as_index=False)
+                          .agg(cum_eff_pool=("cum_eff_unit", "sum"),
+                               cum_cf_pool=("cum_cf_unit", "sum")))
+    pooled["cum_rel_pct"] = 100.0 * pooled["cum_eff_pool"] / pooled["cum_cf_pool"].replace(0, np.nan)
+
+    fig, axes = plt.subplots(2, 1, figsize=figsize, dpi=dpi, sharex=True)
+
+    # Top: daily mean tau per class with ±1 SE shading
+    ax = axes[0]
+    for cls in sorted(daily["crz_class"].unique()):
+        sub = daily[daily.crz_class == cls].sort_values("date")
+        col = line_colors.get(cls, "k")
+        ax.fill_between(sub["date"],
+                        sub["daily_mean_tau"] - sub["daily_se_tau"],
+                        sub["daily_mean_tau"] + sub["daily_se_tau"],
+                        color=col, alpha=0.18)
+        ax.plot(sub["date"], sub["daily_mean_tau"], color=col, lw=1.6,
+                label=f"{cls}  (n={int(sub['n_units'].iloc[0])} units)")
+    ax.axhline(0, color="red", ls="--", lw=0.8)
+    ax.set_ylabel("Daily ATT per unit\n(mean across class)")
+    ax.set_title(f"{title_prefix} Daily ATT by CRZ class".strip())
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(alpha=0.3)
+
+    # Bottom: cumulative pooled relative effect (%)
+    ax = axes[1]
+    for cls in sorted(pooled["crz_class"].unique()):
+        sub = pooled[pooled.crz_class == cls].sort_values("date")
+        col = line_colors.get(cls, "k")
+        ax.plot(sub["date"], sub["cum_rel_pct"], color=col, lw=1.8,
+                label=f"{cls}  (final {sub['cum_rel_pct'].iloc[-1]:+.2f}%)")
+    ax.axhline(0, color="red", ls="--", lw=0.8)
+    ax.set_ylabel("Cumulative pooled\nrelative ATT (%)")
+    ax.set_xlabel("Date")
+    ax.set_title(f"{title_prefix} Cumulative relative ATT by CRZ class".strip())
+    ax.legend(loc="best", fontsize=9)
+    ax.grid(alpha=0.3)
+
+    fig.autofmt_xdate()
+    fig.tight_layout()
+    return fig, axes
+
+
 def plot_significance_calendar(
     df_daily: pd.DataFrame,
     year: int | None = None,

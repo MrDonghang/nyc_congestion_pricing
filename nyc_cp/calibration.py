@@ -178,3 +178,250 @@ def residuals_long(actual: pd.DataFrame, mu: pd.DataFrame, id_col: str = "unit_i
     r = a - m
     long = _melt_panel(r, value_name="residual", id_col=id_col)
     return long.set_index(["date", id_col])["residual"]
+
+
+# --------------------------------------------------------------------------
+# Per-unit calibration (one QuantileRegressor set per unit, fall back to
+# pooled when a unit has too few val rows).
+# --------------------------------------------------------------------------
+
+# Features that vary across units but not within a unit — useless when fitting
+# per-unit (constant column ⇒ contributes only to the intercept).
+PER_UNIT_DROP = {"log_level"}
+
+
+def _per_unit_feature_cols(all_feature_cols: list[str]) -> list[str]:
+    return [
+        c for c in all_feature_cols
+        if c not in ID_DROP
+        and c not in PER_UNIT_DROP
+        and not c.endswith("_x_loglvl")  # DOW × log_level interactions are also constant per unit
+    ]
+
+
+@dataclass
+class PerUnitQuantileCalibration:
+    """One ``QuantileCalibration`` per unit; ``fallback`` used for missing units."""
+
+    feature_cols: list[str]
+    per_unit: dict[str, QuantileCalibration]
+    fallback: QuantileCalibration   # pooled cal, used when a unit has too few obs
+    fallback_feature_cols: list[str]
+    median_q: float
+
+
+def fit_per_unit_calibration(
+    val_features: pd.DataFrame,
+    val_residuals: pd.Series,
+    fallback: QuantileCalibration,
+    quantiles: Sequence[float] = DEFAULT_QUANTILES,
+    alpha: float = 1e-4,
+    min_obs: int = 60,
+    id_col: str = "unit_id",
+) -> PerUnitQuantileCalibration:
+    """Fit a separate ``QuantileRegressor`` set per ``unit_id``.
+
+    ``val_features`` is the long-format feature panel (same as for pooled).
+    ``val_residuals`` is a Series indexed by ``(date, unit_id)``. Units with
+    fewer than ``min_obs`` rows are skipped — at apply time we fall back to
+    the pooled ``fallback`` calibration for those.
+    """
+    feature_cols = _per_unit_feature_cols(list(val_features.columns))
+
+    # Align features ↔ residuals on (date, unit_id)
+    feats = val_features.set_index(["date", id_col])
+    common_idx = feats.index.intersection(val_residuals.index)
+    feats = feats.loc[common_idx]
+    res = val_residuals.loc[common_idx]
+
+    units = feats.index.get_level_values(id_col).unique()
+    log.info("Per-unit QR calibration over %d units (min_obs=%d, %d features)",
+             len(units), min_obs, len(feature_cols))
+
+    qs_sorted = sorted(quantiles)
+    median_q = qs_sorted[len(qs_sorted) // 2]
+    per_unit: dict[str, QuantileCalibration] = {}
+    n_skip = 0
+
+    for unit in units:
+        Xu = feats.xs(unit, level=id_col)[feature_cols].astype(float).to_numpy()
+        yu = res.xs(unit, level=id_col).astype(float).to_numpy()
+        mask = np.isfinite(Xu).all(axis=1) & np.isfinite(yu)
+        Xu, yu = Xu[mask], yu[mask]
+        if len(yu) < min_obs:
+            n_skip += 1
+            continue
+
+        try:
+            models = {}
+            for q in quantiles:
+                m = QuantileRegressor(quantile=q, alpha=alpha, solver="highs", fit_intercept=True)
+                m.fit(Xu, yu)
+                models[q] = m
+            per_unit[str(unit)] = QuantileCalibration(
+                feature_cols=feature_cols, models=models, median_q=median_q,
+            )
+        except Exception as e:  # pragma: no cover — solver may fail on degenerate units
+            log.warning("per-unit QR failed for %s: %s — falling back to pooled", unit, e)
+            n_skip += 1
+
+    log.info("Per-unit fitted: %d  fallback: %d / %d", len(per_unit), n_skip, len(units))
+    return PerUnitQuantileCalibration(
+        feature_cols=feature_cols,
+        per_unit=per_unit,
+        fallback=fallback,
+        fallback_feature_cols=fallback.feature_cols,
+        median_q=median_q,
+    )
+
+
+def predict_per_unit_deltas(
+    cal: PerUnitQuantileCalibration,
+    features: pd.DataFrame,
+    id_col: str = "unit_id",
+) -> dict[float, np.ndarray]:
+    """Predict per-quantile residual deltas for ``features``, falling back to
+    pooled ``cal.fallback`` for units not in ``cal.per_unit``.
+
+    Returns ``{q: array of length N}`` aligned to ``features`` rows. Output is
+    NOT row-sorted across quantiles — the caller should ``np.sort`` to enforce
+    non-crossing if needed.
+    """
+    n = len(features)
+    units = features[id_col].astype(str).to_numpy()
+    Xu_per = features[cal.feature_cols].astype(float).to_numpy()
+    Xu_fb = features[cal.fallback_feature_cols].astype(float).to_numpy()
+    qs = sorted(cal.fallback.models.keys())
+    out = {q: np.full(n, np.nan) for q in qs}
+    n_fb = 0
+    for unit in np.unique(units):
+        mask = units == unit
+        if unit in cal.per_unit:
+            cu = cal.per_unit[unit]
+            for q in qs:
+                out[q][mask] = cu.models[q].predict(Xu_per[mask])
+        else:
+            n_fb += 1
+            for q in qs:
+                out[q][mask] = cal.fallback.models[q].predict(Xu_fb[mask])
+    log.info("Per-unit predict: %d units, %d fallback to pooled", len(np.unique(units)), n_fb)
+    return out
+
+
+def apply_per_unit_calibration(
+    cal: PerUnitQuantileCalibration,
+    test_features: pd.DataFrame,
+    mu_test: pd.DataFrame,
+    quantile_lo: float,
+    quantile_hi: float,
+    id_col: str = "unit_id",
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Apply per-unit calibration; fall back to ``cal.fallback`` for missing units."""
+    out = test_features[["date", id_col, "mu_pred"]].copy()
+
+    deltas = predict_per_unit_deltas(cal, test_features, id_col=id_col)
+    qs = sorted(deltas.keys())
+    arr = np.sort(np.stack([deltas[q] for q in qs], axis=0), axis=0)
+    delta_lo = arr[qs.index(quantile_lo)]
+    delta_med = arr[qs.index(cal.median_q)]
+    delta_hi = arr[qs.index(quantile_hi)]
+
+    out["mu_cal"] = out["mu_pred"] + delta_med
+    out["lower_cal"] = out["mu_pred"] + delta_lo
+    out["upper_cal"] = out["mu_pred"] + delta_hi
+
+    def _pivot(col: str) -> pd.DataFrame:
+        wide = out.pivot(index="date", columns=id_col, values=col)
+        return wide.reindex(mu_test.index).reindex(columns=mu_test.columns)
+
+    return _pivot("mu_cal"), _pivot("lower_cal"), _pivot("upper_cal")
+
+
+# --------------------------------------------------------------------------
+# Per-unit intercept + pooled QR (cheap intermediate between pooled and
+# fully per-unit). Per unit: 1 free param (mean residual). Pooled QR: same
+# design as global qrcal, fit on de-biased residuals so it learns PI shape
+# only.
+# --------------------------------------------------------------------------
+
+
+@dataclass
+class InterceptPlusPooledCalibration:
+    intercepts: dict[str, float]
+    pooled: QuantileCalibration            # fit on residuals AFTER subtracting per-unit intercept
+    fallback_intercept: float = 0.0
+
+
+def fit_intercept_plus_pooled_calibration(
+    val_features: pd.DataFrame,
+    val_residuals: pd.Series,
+    quantiles: Sequence[float] = DEFAULT_QUANTILES,
+    alpha: float = 1e-4,
+    id_col: str = "unit_id",
+) -> InterceptPlusPooledCalibration:
+    """Step 1: per-unit mean residual = level shift correction.
+    Step 2: pooled QR on de-biased residuals = PI shape.
+
+    ``val_residuals`` is a Series indexed by ``(date, unit_id)``.
+    ``val_features`` is the long-format feature panel (same as for pooled).
+    """
+    feats = val_features.set_index(["date", id_col])
+    common_idx = feats.index.intersection(val_residuals.index)
+    feats = feats.loc[common_idx]
+    res = val_residuals.loc[common_idx]
+
+    intercepts = res.dropna().groupby(level=id_col).mean()
+    intercepts.index = intercepts.index.astype(str)
+    intercepts_dict = intercepts.to_dict()
+
+    res_debiased = res - res.index.get_level_values(id_col).astype(str).map(intercepts_dict)
+    pooled = fit_calibration(feats.reset_index(), res_debiased, quantiles=quantiles, alpha=alpha)
+
+    log.info("Intercept+pooled cal: %d unit intercepts (mean=%+.1f, std=%.1f), pooled QR on %d obs",
+             len(intercepts_dict), float(intercepts.mean()), float(intercepts.std()), len(res_debiased))
+    return InterceptPlusPooledCalibration(intercepts=intercepts_dict, pooled=pooled)
+
+
+def predict_intercept_plus_pooled_deltas(
+    cal: InterceptPlusPooledCalibration,
+    features: pd.DataFrame,
+    id_col: str = "unit_id",
+) -> dict[float, np.ndarray]:
+    """Predict per-quantile deltas = per-unit intercept + pooled QR delta.
+
+    Output ``{q: array length N}`` matches the API of
+    ``QuantileCalibration.predict_deltas`` so the k-fold loop can use it
+    interchangeably. NOT row-sorted across quantiles — caller sorts.
+    """
+    units = features[id_col].astype(str).to_numpy()
+    intercepts_arr = np.array([cal.intercepts.get(u, cal.fallback_intercept) for u in units])
+    pooled_deltas = cal.pooled.predict_deltas(features)
+    return {q: intercepts_arr + pooled_deltas[q] for q in pooled_deltas}
+
+
+def apply_intercept_plus_pooled_calibration(
+    cal: InterceptPlusPooledCalibration,
+    test_features: pd.DataFrame,
+    mu_test: pd.DataFrame,
+    quantile_lo: float,
+    quantile_hi: float,
+    id_col: str = "unit_id",
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    out = test_features[["date", id_col, "mu_pred"]].copy()
+
+    deltas = predict_intercept_plus_pooled_deltas(cal, test_features, id_col=id_col)
+    qs = sorted(deltas.keys())
+    arr = np.sort(np.stack([deltas[q] for q in qs], axis=0), axis=0)
+    delta_lo = arr[qs.index(quantile_lo)]
+    delta_med = arr[qs.index(cal.pooled.median_q)]
+    delta_hi = arr[qs.index(quantile_hi)]
+
+    out["mu_cal"] = out["mu_pred"] + delta_med
+    out["lower_cal"] = out["mu_pred"] + delta_lo
+    out["upper_cal"] = out["mu_pred"] + delta_hi
+
+    def _pivot(col: str) -> pd.DataFrame:
+        wide = out.pivot(index="date", columns=id_col, values=col)
+        return wide.reindex(mu_test.index).reindex(columns=mu_test.columns)
+
+    return _pivot("mu_cal"), _pivot("lower_cal"), _pivot("upper_cal")

@@ -2,13 +2,16 @@ mode: replica
 drop_all_zero_columns: true
 weekday_only: false
 
-# Replica is weekly (W-SAT). Boundaries follow the original arima/prophet/deepar
-# scripts — Saturday-aligned, with test horizon ending on the last Saturday of April.
+# Replica is weekly (W-SAT). Saturday-aligned. Val window now matches the
+# test window's calendar months (Jan–Apr) so DOW/month features in the
+# calibration design are seasonally consistent across val and test.
+# Previous val was Oct–Dec 2024 vs test Jan–Apr 2025, which broke month
+# dummies (none of test's months were ever seen by the calibrator on val).
 windows:
   val:
-    train_end:  "2024-09-21"
-    test_start: "2024-09-28"
-    test_end:   "2024-12-28"
+    train_end:  "2023-12-30"
+    test_start: "2024-01-06"
+    test_end:   "2024-04-27"
   test:
     train_end:  "2024-12-28"
     test_start: "2025-01-04"

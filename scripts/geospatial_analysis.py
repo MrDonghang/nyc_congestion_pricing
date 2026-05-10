@@ -31,7 +31,15 @@ import pandas as pd
 
 from nyc_cp.analysis import demographics
 from nyc_cp.analysis.causal import run_spatial_regression, run_tree_models, stepwise_vif_filter
-from nyc_cp.analysis.geospatial import map_units_to_tracts
+from nyc_cp.analysis.geospatial import (
+    map_units_to_tracts,
+    plot_choropleth,
+    plot_effects_over_time,
+    plot_trends_by_crz,
+    plot_unit_effects,
+    plot_unit_effects_by_significance,
+    summarize_effects_by_crz,
+)
 from nyc_cp.config import load_paths, normalize_window_name, output_dir
 from nyc_cp.utils import setup_logging
 
@@ -40,8 +48,8 @@ log = logging.getLogger("geospatial_analysis")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike"])
-    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts", "chronos_qrcal", "timesfm_qrcal"])
+    p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
+    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts", "chronos_qrcal", "timesfm_qrcal", "chronos_qrcal_perunit", "timesfm_qrcal_perunit", "chronos_qrcal_intercept", "timesfm_qrcal_intercept", "chronos_qrcal_oos", "timesfm_qrcal_oos", "chronos_qrcal_intercept_insample", "timesfm_qrcal_intercept_insample"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D"], default="all")
     p.add_argument("--y-col", default="att", help="Tract-level outcome column for regressions.")
@@ -111,6 +119,18 @@ def _tract_effects(args, paths, geo) -> "geopandas.GeoDataFrame":
             stations, geo["tracts"], unit, join_col_units="station_id", join_col_effects="station_id", metric_cols=metric_cols
         )
 
+    if args.mode == "replica":
+        # Replica units are tracts keyed by full 11-digit FIPS GEOID strings
+        # (e.g. "36061000100"). Direct merge with the NYC tract shapefile's
+        # GEOID — no index pkl needed. Tracts in the replica panel that lie
+        # outside NYC (e.g. Suffolk County 36103xx) won't match and become
+        # NaN ATT in the output GDF — correct behaviour.
+        unit = unit.rename(columns={unit.columns[0]: "tract_id"}) if unit.columns[0] != "tract_id" else unit
+        unit["tract_id"] = unit["tract_id"].astype(str)
+        tracts = geo["tracts"].copy()
+        tracts["GEOID"] = tracts["GEOID"].astype(str)
+        return tracts.merge(unit, left_on="GEOID", right_on="tract_id", how="left")
+
     if args.mode == "citibike":
         # citibike units are tract-indexed by *integer position*, not FIPS GEOID.
         # The processing step (nyc_cp.data.citibike) builds an index over 6-digit
@@ -160,6 +180,159 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     tracts_with_dem.to_file(out_dir / "tract_effects.geojson", driver="GeoJSON")
     log.info("Wrote %s", out_dir / "tract_effects.geojson")
+
+    # ----------------------------------------------------------------------
+    # Significance-categorical map + CRZ-grouped summary
+    # ----------------------------------------------------------------------
+    log.info("Building significance map + CRZ summary")
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import geopandas as gpd
+
+    eff_dir = output_dir(args.mode, args.model, direction=args.direction, paths=paths) / "effects"
+    prefix = f"{args.mode}_{args.model}_{args.window}" + (f"_{args.direction}" if args.direction != "all" else "")
+    unit_csv = eff_dir / f"{prefix}_unit.csv"
+    unit = pd.read_csv(unit_csv)
+    id_col = unit.columns[0]
+    unit = unit.rename(columns={id_col: id_col})  # no-op, keeps name explicit
+
+    # Pick the right unit-geometry GDF + CRZ kind per mode
+    if args.mode == "bus":
+        units_gdf = gpd.read_file(geo["bus_routes"])
+        join_col = "route_id"
+        kind = "routes"
+    elif args.mode == "subway":
+        units_gdf = gpd.read_file(geo["subway_stations"])
+        units_gdf["station_id"] = units_gdf["station_id"].astype(str)
+        join_col = "station_id"
+        kind = "stations"
+    elif args.mode == "replica":
+        # Replica unit is the tract itself (GEOID-keyed). Use the NYC tract
+        # polygons directly so that CRZ classification is by polygon-share.
+        units_gdf = geo["tracts"].copy()
+        units_gdf["GEOID"] = units_gdf["GEOID"].astype(str)
+        units_gdf = units_gdf.rename(columns={"GEOID": "tract_id"})
+        join_col = "tract_id"
+        kind = "tracts"
+    else:  # citibike — units are tract polygons; reuse the tract_eff result
+        # tract_eff already has merged effect columns (att, signif, etc.); the
+        # downstream plotting helpers do their own merge against `unit`, so
+        # we'd get att_x / att_y suffixes. Keep only geometry + join key here.
+        keep = ["tract_id", "geometry"] if "tract_id" in tract_eff.columns else [id_col, "geometry"]
+        units_gdf = tract_eff[keep].copy()
+        join_col = keep[0]
+        kind = "tracts"
+
+    crz_polygon = geo["crz"]
+
+    # Categorical significance map
+    fig, ax = plt.subplots(figsize=(11, 11), dpi=200)
+    plot_unit_effects_by_significance(
+        units_gdf=units_gdf,
+        effects_df=unit.rename(columns={id_col: join_col}) if id_col != join_col else unit,
+        join_col=join_col,
+        crz_polygon=crz_polygon,
+        ax=ax,
+        title=f"{args.mode} {args.direction} — {args.model}: per-unit ATT significance",
+    )
+    fig.savefig(out_dir / "significance_map.png", bbox_inches="tight")
+    plt.close(fig)
+    log.info("Wrote %s", out_dir / "significance_map.png")
+
+    # CRZ-grouped summary table
+    crz_summary = summarize_effects_by_crz(
+        units_gdf=units_gdf,
+        effects_df=unit.rename(columns={id_col: join_col}) if id_col != join_col else unit,
+        crz_polygon=crz_polygon,
+        kind=kind,
+        join_col=join_col,
+    )
+    crz_summary.to_csv(out_dir / "crz_summary.csv", index=False)
+    log.info("Wrote %s\n%s", out_dir / "crz_summary.csv", crz_summary.to_string(index=False))
+
+    # ----------------------------------------------------------------------
+    # 4 additional standard plots:
+    #   (a) daily ATT trend (mean_tau over time, with PI band)
+    #   (b) cumulative ATT trend (cum_tau over time)
+    #   (c) per-unit effect on raw geometry (continuous color)
+    #   (d) tract-level choropleth (aggregated to census tracts)
+    # ----------------------------------------------------------------------
+    log.info("Building daily/cumulative trend + per-unit/tract maps")
+
+    # (a) + (b) — trends BY CRZ CLASS from _long.csv (per-(unit, date) panel)
+    # This replaces the panel-aggregate single-line plot with one line per
+    # CRZ class so the spatial heterogeneity is visible in the time domain.
+    long_csv = eff_dir / f"{prefix}_long.csv"
+    if long_csv.exists():
+        try:
+            long_df = pd.read_csv(long_csv)
+            # Make the join column name match what the unit_gdf uses
+            if id_col != join_col and id_col in long_df.columns:
+                long_df = long_df.rename(columns={id_col: join_col})
+            fig, _ = plot_trends_by_crz(
+                long_df=long_df,
+                units_gdf=units_gdf,
+                crz_polygon=crz_polygon,
+                kind=kind,
+                join_col=join_col,
+                title_prefix=f"{args.mode} {args.direction} — {args.model}",
+            )
+            fig.savefig(out_dir / "trends_by_crz.png", bbox_inches="tight")
+            plt.close(fig)
+            log.info("Wrote %s", out_dir / "trends_by_crz.png")
+        except Exception as e:
+            log.warning("Failed trends_by_crz.png: %s", e)
+        # Also keep the panel-aggregate version for completeness
+        daily_csv = eff_dir / f"{prefix}_daily.csv"
+        if daily_csv.exists():
+            df_daily = pd.read_csv(daily_csv)
+            for kind_, fname in [("daily_att", "daily_att.png"), ("cum_att", "cumulative_att.png")]:
+                try:
+                    fig, _ = plot_effects_over_time(df_daily, mode=kind_,
+                                                    title_prefix=f"{args.mode} {args.direction} — {args.model}")
+                    fig.savefig(out_dir / fname, bbox_inches="tight")
+                    plt.close(fig)
+                    log.info("Wrote %s", out_dir / fname)
+                except Exception as e:
+                    log.warning("Failed %s: %s", fname, e)
+    else:
+        log.warning("long.csv not found at %s; skipping trend plots", long_csv)
+
+    # (c) — per-unit effect on raw geometry (continuous diverging color)
+    try:
+        fig, _ = plot_unit_effects(
+            units_gdf=units_gdf,
+            effects_df=unit.rename(columns={id_col: join_col}) if id_col != join_col else unit,
+            join_col=join_col,
+            value_col="att",
+            crz_polygon=crz_polygon,
+            point_size_by_abs=(kind == "stations"),
+            figsize=(11, 11), dpi=150,
+        )
+        fig.savefig(out_dir / "unit_effects_map.png", bbox_inches="tight")
+        plt.close(fig)
+        log.info("Wrote %s", out_dir / "unit_effects_map.png")
+    except Exception as e:
+        log.warning("Failed unit_effects_map.png: %s", e)
+
+    # (d) — tract-level choropleth (aggregate); skip for replica/citibike where
+    # units already are tracts (the unit map IS the tract map).
+    if args.mode in ("bus", "subway"):
+        try:
+            fig, _ = plot_choropleth(
+                tracts_with_dem,
+                column="att",
+                crz_polygon=crz_polygon,
+                cmap="RdBu_r",
+                legend_label="mean per-tract ATT",
+                figsize=(10, 10), dpi=150,
+            )
+            fig.savefig(out_dir / "tract_choropleth.png", bbox_inches="tight")
+            plt.close(fig)
+            log.info("Wrote %s", out_dir / "tract_choropleth.png")
+        except Exception as e:
+            log.warning("Failed tract_choropleth.png: %s", e)
 
     if args.skip_regression:
         log.info("--skip-regression set; stopping before OLS/ML and tree models.")

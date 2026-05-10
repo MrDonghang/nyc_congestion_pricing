@@ -24,8 +24,14 @@ import pandas as pd
 from nyc_cp.analysis.effects import load_forecast_triplet
 from nyc_cp.calibration import (
     apply_calibration,
+    apply_intercept_plus_pooled_calibration,
+    apply_per_unit_calibration,
     build_features,
     fit_calibration,
+    fit_intercept_plus_pooled_calibration,
+    fit_per_unit_calibration,
+    predict_intercept_plus_pooled_deltas,
+    predict_per_unit_deltas,
     residuals_long,
 )
 from nyc_cp.config import get_window, load_mode, load_paths, output_dir
@@ -45,11 +51,20 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--direction", choices=["all", "O", "D"], default="all")
     p.add_argument("--coverage", type=float, default=0.9)
     p.add_argument("--alpha", type=float, default=1e-4, help="L1 regularization for QuantileRegressor.")
-    p.add_argument("--suffix", default="qrcal", help="Suffix appended to base model name.")
+    p.add_argument("--suffix", default=None,
+                   help="Suffix appended to base model name. Defaults to qrcal (or qrcal_perunit with --per-unit).")
     p.add_argument("--val-kfold", type=int, default=0,
                    help="Folds for out-of-sample val calibration (date-stratified). 0 disables val output.")
     p.add_argument("--insample-val", action="store_true",
                    help="Apply the val-fitted calibration back to val in-sample (no CV). Mutually exclusive with --val-kfold>0.")
+    p.add_argument("--per-unit", action="store_true",
+                   help="Fit one QuantileRegressor set per unit (route/station/tract). "
+                        "Units with fewer than --per-unit-min-obs val rows fall back to the pooled fit.")
+    p.add_argument("--per-unit-min-obs", type=int, default=60,
+                   help="Minimum val rows for a unit to be fit on its own; below this falls back to pooled.")
+    p.add_argument("--per-unit-intercept", action="store_true",
+                   help="Per-unit intercept (mean residual) + pooled QR on de-biased residuals. "
+                        "Cheap intermediate between pooled and full per-unit. Mutually exclusive with --per-unit.")
     return p.parse_args()
 
 
@@ -70,6 +85,15 @@ def main() -> None:
     args = parse_args()
     if args.insample_val and args.val_kfold > 0:
         raise SystemExit("--insample-val and --val-kfold>0 are mutually exclusive.")
+    if args.per_unit and args.per_unit_intercept:
+        raise SystemExit("--per-unit and --per-unit-intercept are mutually exclusive.")
+    if args.suffix is None:
+        if args.per_unit:
+            args.suffix = "qrcal_perunit"
+        elif args.per_unit_intercept:
+            args.suffix = "qrcal_intercept"
+        else:
+            args.suffix = "qrcal"
     paths = load_paths()
     setup_logging(f"calibrate_{args.mode}_{args.base_model}_{args.direction}", log_root=paths["log_root"])
 
@@ -136,9 +160,35 @@ def main() -> None:
     for q, m in cal.models.items():
         log.info("q=%.2f  intercept=%.1f  ||coef||_1=%.1f", q, m.intercept_, np.abs(m.coef_).sum())
 
-    mu_cal, lower_cal, upper_cal = apply_calibration(
-        cal, test_feat, test_fc.mu, quantile_lo=q_lo, quantile_hi=q_hi, id_col="unit_id",
-    )
+    # val_res_a's MultiIndex was built with the mode's native id_col name
+    # (e.g. route_id). Rename to match the renamed feature panel.
+    val_res_pu = val_res_a.copy()
+    val_res_pu.index = val_res_pu.index.rename(["date", "unit_id"])
+
+    pucal = ipcal = None
+    if args.per_unit:
+        log.info("Fitting per-unit calibration on top of pooled (fallback for sparse units).")
+        pucal = fit_per_unit_calibration(
+            val_feat_a, val_res_pu, fallback=cal,
+            quantiles=quantiles, alpha=args.alpha,
+            min_obs=args.per_unit_min_obs, id_col="unit_id",
+        )
+        mu_cal, lower_cal, upper_cal = apply_per_unit_calibration(
+            pucal, test_feat, test_fc.mu, quantile_lo=q_lo, quantile_hi=q_hi, id_col="unit_id",
+        )
+    elif args.per_unit_intercept:
+        log.info("Fitting per-unit intercept + pooled QR on de-biased residuals.")
+        ipcal = fit_intercept_plus_pooled_calibration(
+            val_feat_a, val_res_pu,
+            quantiles=quantiles, alpha=args.alpha, id_col="unit_id",
+        )
+        mu_cal, lower_cal, upper_cal = apply_intercept_plus_pooled_calibration(
+            ipcal, test_feat, test_fc.mu, quantile_lo=q_lo, quantile_hi=q_hi, id_col="unit_id",
+        )
+    else:
+        mu_cal, lower_cal, upper_cal = apply_calibration(
+            cal, test_feat, test_fc.mu, quantile_lo=q_lo, quantile_hi=q_hi, id_col="unit_id",
+        )
 
     _diagnose_dow(a_test, mu_cal, "test (post-cal)")
 
@@ -158,9 +208,18 @@ def main() -> None:
     if args.insample_val:
         log.info("Applying val-fitted calibration back to val in-sample (no CV)...")
         val_feat_is = build_features(history_for_levels, val_fc.mu, id_col=id_col).rename(columns={id_col: "unit_id"})
-        v_mu, v_lo, v_hi = apply_calibration(
-            cal, val_feat_is, val_fc.mu, quantile_lo=q_lo, quantile_hi=q_hi, id_col="unit_id",
-        )
+        if args.per_unit:
+            v_mu, v_lo, v_hi = apply_per_unit_calibration(
+                pucal, val_feat_is, val_fc.mu, quantile_lo=q_lo, quantile_hi=q_hi, id_col="unit_id",
+            )
+        elif args.per_unit_intercept:
+            v_mu, v_lo, v_hi = apply_intercept_plus_pooled_calibration(
+                ipcal, val_feat_is, val_fc.mu, quantile_lo=q_lo, quantile_hi=q_hi, id_col="unit_id",
+            )
+        else:
+            v_mu, v_lo, v_hi = apply_calibration(
+                cal, val_feat_is, val_fc.mu, quantile_lo=q_lo, quantile_hi=q_hi, id_col="unit_id",
+            )
         new_prefix_val = f"{args.mode}_{new_model}_val{suffix}"
         ForecastResult(mu=v_mu, lower=v_lo, upper=v_hi, coverage_level=args.coverage).save(out_dir, new_prefix_val)
         log.info("Saved in-sample val calibrated forecasts to %s/%s_*.csv", out_dir, new_prefix_val)
@@ -203,7 +262,29 @@ def main() -> None:
             test_X = val_feat_full.loc[test_mask].reset_index()
             log.info("  fold %d/%d: train=%d  test=%d (dates=%d)", k + 1, args.val_kfold, len(train_y), test_mask.sum(), len(fold_dates))
             cal_k = fit_calibration(train_X, train_y, quantiles=quantiles, alpha=args.alpha)
-            deltas_k = cal_k.predict_deltas(test_X)
+
+            if args.per_unit:
+                # Per-fold per-unit fit using cal_k (this fold's pooled cal) as fallback.
+                # Units with < per_unit_min_obs train rows in this fold fall back to cal_k.
+                train_y_pu = train_y.copy()
+                train_y_pu.index = train_y_pu.index.rename(["date", "unit_id"])
+                pucal_k = fit_per_unit_calibration(
+                    train_X, train_y_pu, fallback=cal_k,
+                    quantiles=quantiles, alpha=args.alpha,
+                    min_obs=args.per_unit_min_obs, id_col="unit_id",
+                )
+                deltas_k = predict_per_unit_deltas(pucal_k, test_X, id_col="unit_id")
+            elif args.per_unit_intercept:
+                train_y_pu = train_y.copy()
+                train_y_pu.index = train_y_pu.index.rename(["date", "unit_id"])
+                ipcal_k = fit_intercept_plus_pooled_calibration(
+                    train_X, train_y_pu,
+                    quantiles=quantiles, alpha=args.alpha, id_col="unit_id",
+                )
+                deltas_k = predict_intercept_plus_pooled_deltas(ipcal_k, test_X, id_col="unit_id")
+            else:
+                deltas_k = cal_k.predict_deltas(test_X)
+
             arr = np.sort(np.stack([deltas_k[q] for q in sorted(deltas_k)], axis=0), axis=0)
             qs_sorted = sorted(deltas_k)
             d_lo = arr[qs_sorted.index(q_lo)]

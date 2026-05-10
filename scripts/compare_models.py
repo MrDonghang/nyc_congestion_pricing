@@ -35,6 +35,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--direction", choices=["all", "O", "D"], default="all")
     p.add_argument("--models", nargs="+", default=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts"])
     p.add_argument("--coverage-level", type=float, default=0.9)
+    p.add_argument("--suffix", default=None,
+                   help="Optional tag appended to the output filename, e.g. 'IS' or 'OOS'. "
+                        "Default: no suffix (overwrites the canonical compare_<mode>_<window>[_<dir>].csv).")
     return p.parse_args()
 
 
@@ -78,7 +81,7 @@ def main() -> None:
     table = pd.concat(rows, ignore_index=True)
     summary_dir = Path(paths["output_root"]) / args.mode / "_summary"
     summary_dir.mkdir(parents=True, exist_ok=True)
-    fname = f"compare_{args.mode}_{args.window}" + (f"_{args.direction}" if args.direction != "all" else "") + ".csv"
+    fname = f"compare_{args.mode}_{args.window}" + (f"_{args.direction}" if args.direction != "all" else "") + (f"_{args.suffix}" if args.suffix else "") + ".csv"
     out = summary_dir / fname
     table.to_csv(out, index=False)
     log.info("Wrote %s", out)

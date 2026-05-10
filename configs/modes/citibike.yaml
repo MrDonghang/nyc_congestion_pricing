@@ -2,8 +2,16 @@ mode: citibike
 drop_columns_with_zero_share_above: 0.5
 weekday_only: false
 
-# Citibike tunes on the 3 months immediately preceding the policy, not the
-# year-displaced Jan–Apr window used for bus/subway.
+# Citibike data only starts 2023-12-31 (~17 months total). This rules out
+# a Jan–Apr 2024 val window (would have <1 week of history before val
+# train_end). We keep the Q4 2024 val with 9 months of history.
+#
+# IMPORTANT CAVEAT: val (Q4 2024) and test (Q1–Q2 2025) span DIFFERENT
+# seasons. Calibration features (month dummies) collapse to the January
+# reference at test time, producing implausible relative effects (+148%
+# observed for chronos_qrcal). DO NOT calibrate citibike with the current
+# pipeline — only use raw chronos / timesfm forecasts. This is a data-
+# coverage limitation, not a methodology issue.
 windows:
   val:
     train_end:  "2024-09-30"
