@@ -120,7 +120,7 @@ def _load_citibike_geo() -> gpd.GeoDataFrame:
 
 MODE_CONFIG = {
     "bus":      {"directions": ["all"],   "id_col": "route_id",      "geo_kind": "line",    "geo_loader": _load_bus_geo,      "freq_label": "daily"},
-    "subway":   {"directions": ["O", "D"], "id_col": "station_index", "geo_kind": "point",   "geo_loader": _load_subway_geo,   "freq_label": "daily"},
+    "subway":   {"directions": ["O", "D", "total"], "id_col": "station_index", "geo_kind": "point",   "geo_loader": _load_subway_geo,   "freq_label": "daily"},
     "replica":  {"directions": ["O", "D"], "id_col": "tract_id",      "geo_kind": "polygon", "geo_loader": _load_replica_geo,  "freq_label": "weekly"},
     "citibike": {"directions": ["O", "D"], "id_col": "tract_id",      "geo_kind": "polygon", "geo_loader": _load_citibike_geo, "freq_label": "daily"},
 }

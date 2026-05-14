@@ -32,7 +32,7 @@ SUMMARY.mkdir(parents=True, exist_ok=True)
 HEADLINE = ["chronos", "chronos_qrcal", "chronos_qrcal_intercept",
             "timesfm", "timesfm_qrcal", "timesfm_qrcal_intercept"]
 
-MODE_DIRS = {"bus": ["all"], "subway": ["O", "D"], "replica": ["O", "D"], "citibike": ["O", "D"]}
+MODE_DIRS = {"bus": ["all"], "subway": ["O", "D", "total"], "replica": ["O", "D"], "citibike": ["O", "D"]}
 
 # Citibike has only raw chronos + timesfm because val/test seasonal misalignment
 # (data starts 2024-01) makes calibration produce artifacts (~+148% rel_eff).
@@ -114,12 +114,12 @@ def build_unified_att_table() -> None:
     """
     rows = []
     # 11 headline models (5 baselines + raw chronos + raw timesfm + 4 cal variants)
-    # plus the IS/OOS sibling variants for completeness
+    # plus the OOS sibling variants for robustness check.
     ALL = ["arima", "bsts", "prophet", "nhits", "tft",
            "chronos", "chronos_qrcal", "chronos_qrcal_intercept",
            "timesfm", "timesfm_qrcal", "timesfm_qrcal_intercept",
            "chronos_qrcal_oos", "timesfm_qrcal_oos",
-           "chronos_qrcal_intercept_insample", "timesfm_qrcal_intercept_insample"]
+           "chronos_qrcal_intercept_oos", "timesfm_qrcal_intercept_oos"]
     for mode, dirs in MODE_DIRS.items():
         for direction in dirs:
             d_path = "" if direction == "all" else direction

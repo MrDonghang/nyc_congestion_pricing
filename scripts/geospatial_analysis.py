@@ -46,12 +46,28 @@ from nyc_cp.utils import setup_logging
 log = logging.getLogger("geospatial_analysis")
 
 
+# Mapping from internal model id → publication-ready display name.
+# Used for figure titles and legend labels (not file paths).
+DISPLAY_NAME = {
+    "chronos":                            "Chronos (raw)",
+    "chronos_qrcal":                      "Chronos+QR",
+    "chronos_qrcal_oos":                  "Chronos+QR (OOS)",
+    "chronos_qrcal_intercept":            "HQC-Chronos",
+    "chronos_qrcal_intercept_oos":        "HQC-Chronos (OOS)",
+    "timesfm":                            "TimesFM (raw)",
+    "timesfm_qrcal":                      "TimesFM+QR",
+    "timesfm_qrcal_oos":                  "TimesFM+QR (OOS)",
+    "timesfm_qrcal_intercept":            "HQC-TimesFM",
+    "timesfm_qrcal_intercept_oos":        "HQC-TimesFM (OOS)",
+}
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
-    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts", "chronos_qrcal", "timesfm_qrcal", "chronos_qrcal_perunit", "timesfm_qrcal_perunit", "chronos_qrcal_intercept", "timesfm_qrcal_intercept", "chronos_qrcal_oos", "timesfm_qrcal_oos", "chronos_qrcal_intercept_insample", "timesfm_qrcal_intercept_insample"])
+    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts", "chronos_qrcal", "timesfm_qrcal", "chronos_qrcal_perunit", "timesfm_qrcal_perunit", "chronos_qrcal_intercept", "timesfm_qrcal_intercept", "chronos_qrcal_oos", "timesfm_qrcal_oos", "chronos_qrcal_intercept_oos", "timesfm_qrcal_intercept_oos"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
-    p.add_argument("--direction", choices=["all", "O", "D"], default="all")
+    p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")
     p.add_argument("--y-col", default="att", help="Tract-level outcome column for regressions.")
     p.add_argument("--vif-threshold", type=float, default=20.0)
     p.add_argument(
@@ -234,7 +250,7 @@ def main() -> None:
         join_col=join_col,
         crz_polygon=crz_polygon,
         ax=ax,
-        title=f"{args.mode} {args.direction} — {args.model}: per-unit ATT significance",
+        title=f"{args.mode} {args.direction} — {DISPLAY_NAME.get(args.model, args.model)}: per-unit ATT significance",
     )
     fig.savefig(out_dir / "significance_map.png", bbox_inches="tight")
     plt.close(fig)
@@ -276,7 +292,7 @@ def main() -> None:
                 crz_polygon=crz_polygon,
                 kind=kind,
                 join_col=join_col,
-                title_prefix=f"{args.mode} {args.direction} — {args.model}",
+                title_prefix=f"{args.mode} {args.direction} — {DISPLAY_NAME.get(args.model, args.model)}",
             )
             fig.savefig(out_dir / "trends_by_crz.png", bbox_inches="tight")
             plt.close(fig)
@@ -290,7 +306,7 @@ def main() -> None:
             for kind_, fname in [("daily_att", "daily_att.png"), ("cum_att", "cumulative_att.png")]:
                 try:
                     fig, _ = plot_effects_over_time(df_daily, mode=kind_,
-                                                    title_prefix=f"{args.mode} {args.direction} — {args.model}")
+                                                    title_prefix=f"{args.mode} {args.direction} — {DISPLAY_NAME.get(args.model, args.model)}")
                     fig.savefig(out_dir / fname, bbox_inches="tight")
                     plt.close(fig)
                     log.info("Wrote %s", out_dir / fname)

@@ -39,9 +39,13 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
     p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
-    p.add_argument("--direction", choices=["all", "O", "D"], default="all")
+    p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--no-optuna", action="store_true", help="Disable Optuna search even if config sets it.")
+    p.add_argument("--input-size", type=int, default=None,
+                   help="Override the model config's input_size (lookback window). "
+                        "Needed for short-history modes like replica (weekly, ~105 weeks) where "
+                        "the default 180 exceeds the training horizon.")
     p.add_argument(
         "--from-checkpoint",
         action="store_true",
@@ -58,6 +62,7 @@ def run(
     seed: int,
     disable_optuna: bool,
     from_checkpoint: bool = False,
+    input_size: int | None = None,
 ) -> None:
     set_seed(seed)
     window_name = normalize_window_name(window_name)  # "validation" -> "val"
@@ -68,6 +73,9 @@ def run(
     model_cfg = load_model(model_name)
     if disable_optuna:
         model_cfg.pop("optuna", None)
+    if input_size is not None:
+        log.info("Overriding input_size: %s → %d", model_cfg.get("input_size"), input_size)
+        model_cfg["input_size"] = input_size
     model_cfg.setdefault("freq", paths["modes"][mode]["freq"])
 
     window: Window = get_window(mode, window_name, mode_cfg=mode_cfg)
@@ -126,6 +134,7 @@ def main() -> None:
         seed=args.seed,
         disable_optuna=args.no_optuna,
         from_checkpoint=args.from_checkpoint,
+        input_size=args.input_size,
     )
 
 

@@ -1,153 +1,182 @@
-"""Geographic + temporal visualisation of one (mode, model, window) ATT run.
+"""Publication spatial figures: per-unit ATT and tract-aggregated ATT
+for the 5 (mode, direction) pairs used in the paper —
+bus (all), subway O, subway D, replica O, replica D.
 
 Reads the artefacts produced by ``scripts.compute_effects`` and
 ``scripts.geospatial_analysis``:
-  * ``effects/<prefix>_daily.csv``         — daily mean / cumulative ATT
-  * ``causal/tract_effects.geojson``       — per-tract effect + ACS demographics
+  * ``effects/<prefix>_unit.csv``        — per-unit ATT (route/station/tract)
+  * ``causal/tract_effects.geojson``     — per-tract effect + ACS demographics
 
-Produces three figures:
-  1. **Choropleth** of tract-level mean ATT (with CRZ boundary overlay).
-  2. **Choropleth** of cumulative relative ATT (% of counterfactual).
-  3. **Calendar** of significant ± vs non-significant days.
-  4. **Time series** of daily ATT and cumulative relative ATT, with PI shading.
+Produces, for each ``(mode, direction)`` in ``MODE_CONFIGS``:
+  1. **Per-unit map** — raw unit geometry coloured by mean daily ATT.
+     Bus uses route polylines, subway uses station points (size ∝ |ATT|),
+     replica uses tract polygons (its units *are* tracts).
+  2. **Tract choropleth** — same metric aggregated to census tracts.
 
 Open as a notebook in VS Code / Jupyter; cells delimited by ``# %%``.
 """
 
-# %% Imports + config
+# %% Imports + publication rcParams
+# Auto-reload so edits to nyc_cp.* are picked up without restarting the kernel.
+try:
+    get_ipython().run_line_magic("load_ext", "autoreload")     # type: ignore[name-defined]
+    get_ipython().run_line_magic("autoreload", "2")            # type: ignore[name-defined]
+except (NameError, ImportError):
+    pass
+
 from pathlib import Path
 
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from nyc_cp.analysis.geospatial import (
-    plot_choropleth,
-    plot_effects_over_time,
-    plot_significance_calendar,
-    plot_unit_effects,
-)
-from nyc_cp.config import load_paths, output_dir
+from nyc_cp.analysis.geospatial import plot_choropleth, plot_unit_effects
+from nyc_cp.config import REPO_ROOT, load_paths, output_dir
+from nyc_cp.analysis.geospatial import _add_basemap
 
-# ---- Edit to point at the run you want to visualise.
-MODE = "bus"             # "bus" | "subway" | "citibike"
-DIRECTION = "all"        # "all" | "O" | "D"
-WINDOW = "test"          # "val" | "test"
-MODEL = "chronos"        # any model name with saved effects
-SAVE_FIGS = False        # True → write PNGs under outputs/figures/<mode>_<model>_<window>/
+plt.rcParams.update({
+    "font.size": 10,
+    "axes.titlesize": 11,
+    "axes.labelsize": 10,
+    "legend.fontsize": 9,
+    "pdf.fonttype": 42,  # editable text in vector PDF (journal requirement)
+    "ps.fonttype": 42,
+})
 
-# %% Load artefacts
+# %% Config — edit which (mode, direction) combinations and which model to plot
+MODE_CONFIGS = [
+    {"mode": "bus",     "direction": "all"},
+    {"mode": "subway",  "direction": "O"},
+    {"mode": "subway",  "direction": "D"},
+    {"mode": "replica", "direction": "O"},
+    {"mode": "replica", "direction": "D"},
+]
+MODEL = "timesfm_qrcal_intercept"   # HQC-Chronos (paper headline)
+WINDOW = "test"
+VALUE_COL = "avg_daily"             # mean daily ATT (rides/day). "att" is sum-over-window.
+
+SAVE_FIGS = True
+FIG_DIR = REPO_ROOT / "outputs" / "figures" / "paper" / "spatial"
+
+# %% Load shared geometry (paths resolved against repo root, so cwd-independent)
 paths = load_paths()
-out_dir = output_dir(MODE, MODEL, direction=DIRECTION, paths=paths)
-prefix = f"{MODE}_{MODEL}_{WINDOW}" + (f"_{DIRECTION}" if DIRECTION != "all" else "")
 
-daily_csv = out_dir / "effects" / f"{prefix}_daily.csv"
-tract_geojson = out_dir / "causal" / "tract_effects.geojson"
-if not daily_csv.exists():
-    raise SystemExit(f"Missing {daily_csv} — run scripts.compute_effects first.")
-if not tract_geojson.exists():
-    raise SystemExit(f"Missing {tract_geojson} — run scripts.geospatial_analysis first.")
+_geo_rel = Path(paths["geo_root"])
+GEO_ROOT = _geo_rel if _geo_rel.is_absolute() else REPO_ROOT / _geo_rel
 
-daily = pd.read_csv(daily_csv, parse_dates=["date"])
-# plot_significance_calendar expects ``signif_daily`` (already present) and
-# ``mean_tau``; rename so its tau_col default works without repeated edits.
-daily_for_calendar = daily.rename(columns={"signif_daily": "signif_daily"}).copy()
+tracts = gpd.read_file(GEO_ROOT / "NYC_Census_Tracts_2020" / "NYC_Census_Tracts_2020.shp")
+if "GEOID" not in tracts.columns:
+    tracts = tracts.rename(columns={c: "GEOID" for c in tracts.columns if c.lower() == "geoid"})
+tracts["GEOID"] = tracts["GEOID"].astype(str)
 
-tract_eff = gpd.read_file(tract_geojson)
-crz = gpd.read_file(Path(paths["geo_root"]) / "nyc_cp_boundary_poly_json.geojson")
-print(f"Loaded {MODE}/{MODEL}/{WINDOW}: {len(tract_eff)} tracts, {len(daily)} days")
+crz = gpd.read_file(GEO_ROOT / "nyc_cp_boundary_poly_json.geojson")
+puma = gpd.read_file(GEO_ROOT / "NYC_PUMA" / "NYC_Public_Use_Microdata_Areas_PUMAs_2010.shp")
+bus_routes = gpd.read_file(GEO_ROOT / "bus_routes" / "bus_routes_nyc_dec2019.shp")
+subway_stations = gpd.read_file(GEO_ROOT / "MTA_Subway_Stations_20251029.geojson")
+subway_stations["station_id"] = subway_stations["station_id"].astype(str)
 
-if SAVE_FIGS:
-    fig_dir = Path("outputs") / "figures" / f"{MODE}_{MODEL}_{WINDOW}{('_' + DIRECTION) if DIRECTION != 'all' else ''}"
-    fig_dir.mkdir(parents=True, exist_ok=True)
-else:
-    fig_dir = None
+print(f"Geo loaded: {len(tracts)} tracts, {len(puma)} PUMAs, {len(bus_routes)} routes, {len(subway_stations)} stations")
 
-# %% Figure 1 — Choropleth: mean daily ATT per tract
-# NOTE on column choice: ``att`` in unit.csv / tract_effects.geojson is the
-# *sum* of tau over the test window (≈116 days), not a daily rate. The true
-# mean-daily ATT lives in ``avg_daily``. We use avg_daily here so the colour
-# scale matches ridership-per-day in the ground truth.
-fig, ax = plot_choropleth(
-    tract_eff, column="avg_daily", crz_polygon=crz,
-    cmap="RdBu_r", legend_label="Mean daily ATT (rides/day)",
-    figsize=(11, 11),
-)
-ax.set_title(f"{MODE}/{DIRECTION}/{WINDOW} — mean daily ATT by tract  ({MODEL})", fontsize=13)
-plt.show()
-if fig_dir:
-    fig.savefig(fig_dir / "choropleth_att.png", dpi=200, bbox_inches="tight")
-
-# %% Figure 2 — Choropleth: cumulative relative effect (% of counterfactual)
-if "cum_relative_effect" in tract_eff.columns:
-    fig, ax = plot_choropleth(
-        tract_eff, column="cum_relative_effect", crz_polygon=crz,
-        cmap="RdBu_r", legend_label="Cumulative ATT / counterfactual",
-        figsize=(11, 11),
-    )
-    ax.set_title(f"{MODE}/{DIRECTION}/{WINDOW} — relative cumulative ATT  ({MODEL})", fontsize=13)
-    plt.show()
-    if fig_dir:
-        fig.savefig(fig_dir / "choropleth_relative.png", dpi=200, bbox_inches="tight")
-
-# %% Figure 2b — Per-unit effects (bus polylines / subway points). Skip for citibike.
-if MODE in ("bus", "subway"):
-    geo_root = Path(paths["geo_root"])
-    unit_csv = out_dir / "effects" / f"{prefix}_unit.csv"
+# %% Helper — return (units_gdf, unit_df, join_col) for any (mode, direction)
+def load_unit_geo(mode: str, direction: str):
+    """Mirror of `_tract_effects` logic in scripts/geospatial_analysis.py,
+    but returns the per-unit pieces needed for `plot_unit_effects` (not the
+    tract-aggregated frame).
+    """
+    out = output_dir(mode, MODEL, direction=direction, paths=paths)
+    prefix = f"{mode}_{MODEL}_{WINDOW}" + (f"_{direction}" if direction != "all" else "")
+    unit_csv = out / "effects" / f"{prefix}_unit.csv"
+    if not unit_csv.exists():
+        raise FileNotFoundError(f"missing {unit_csv} — run scripts.compute_effects first")
     unit_df = pd.read_csv(unit_csv)
 
-    if MODE == "bus":
-        units_gdf = gpd.read_file(geo_root / "bus_routes" / "bus_routes_nyc_dec2019.shp")
-        join_col = "route_id"
-        line_width = 1.8
-        point_size = 30.0
-        size_by_abs = False
-    else:  # subway
-        units_gdf = gpd.read_file(geo_root / "MTA_Subway_Stations_20251029.geojson")
-        join_col = "station_id"
-        line_width = 2.0
-        point_size = 35.0
-        size_by_abs = True  # bigger dot = bigger |ATT|
+    if mode == "bus":
+        unit_df = unit_df.rename(columns={unit_df.columns[0]: "route_id"})
+        return bus_routes, unit_df, "route_id"
 
-    # Use ``avg_daily`` (mean daily ATT) — ``att`` is sum-over-window so its
-    # scale would be ~116× the daily ridership we want to compare against.
+    if mode == "subway":
+        unit_df = unit_df.rename(columns={unit_df.columns[0]: "station_id"})
+        unit_df["station_id"] = unit_df["station_id"].astype(str)
+        return subway_stations, unit_df, "station_id"
+
+    if mode == "replica":
+        # Replica unit_id is the full 11-digit FIPS GEOID. Join directly on tracts.GEOID.
+        unit_df = unit_df.rename(columns={unit_df.columns[0]: "tract_id"})
+        unit_df["tract_id"] = unit_df["tract_id"].astype(str)
+        units_gdf = tracts.rename(columns={"GEOID": "tract_id"}).copy()
+        return units_gdf, unit_df, "tract_id"
+
+    raise ValueError(f"unknown mode: {mode}")
+
+
+def _label(mode: str, direction: str) -> str:
+    return mode if direction == "all" else f"{mode}_{direction}"
+
+
+def _save(fig, name: str):
+    if not SAVE_FIGS:
+        return
+    FIG_DIR.mkdir(parents=True, exist_ok=True)
+    fig.savefig(FIG_DIR / f"{name}.pdf", bbox_inches="tight")
+    fig.savefig(FIG_DIR / f"{name}.png", bbox_inches="tight", dpi=200)
+    print(f"  saved → {FIG_DIR / name}.{{pdf,png}}")
+
+
+# %% Loop 1 — Per-unit spatial distribution (5 figures)
+for cfg in MODE_CONFIGS:
+    mode, direction = cfg["mode"], cfg["direction"]
+    print(f"=== per-unit: {mode}/{direction} ===")
+    units_gdf, unit_df, join_col = load_unit_geo(mode, direction)
+
+    if mode == "bus":
+        style = dict(line_width=1.8, point_size=30.0, point_size_by_abs=False)
+    elif mode == "subway":
+        style = dict(line_width=2.0, point_size=35.0, point_size_by_abs=True)
+    else:
+        style = {}
+
     fig, ax = plot_unit_effects(
-        units_gdf, unit_df, join_col=join_col, value_col="avg_daily",
-        crz_polygon=crz, base_layer=tract_eff,
-        cmap="RdBu_r", legend_label=f"Per-{join_col} mean daily ATT (rides/day)",
-        line_width=line_width, point_size=point_size, point_size_by_abs=size_by_abs,
-        figsize=(11, 11),
+        units_gdf, unit_df,
+        join_col=join_col,
+        value_col=VALUE_COL,
+        crz_polygon=crz,
+        puma_polygon=puma,
+        base_layer=tracts,
+        cmap="RdBu_r",
+        legend_label="Mean daily ATT (rides/day)",
+        basemap=True,
+        figsize=(8, 8),
+        dpi=200,
+        **style,
     )
-    title = f"{MODE}/{DIRECTION}/{WINDOW} — per-{'route' if MODE=='bus' else 'station'} ATT  ({MODEL})"
-    if MODE == "subway" and size_by_abs:
-        title += "  (size ∝ |ATT|)"
-    ax.set_title(title, fontsize=13)
+    _save(fig, f"perunit_{_label(mode, direction)}")
     plt.show()
-    if fig_dir:
-        fig.savefig(fig_dir / "per_unit_att.png", dpi=200, bbox_inches="tight")
 
-# %% Figure 3 — Calendar: significance per day
-year = int(daily["date"].dt.year.mode().iloc[0])
-months = sorted(daily["date"].dt.month.unique().tolist())
-fig, _ = plot_significance_calendar(
-    daily_for_calendar, year=year,
-    start_month=int(months[0]), end_month=int(months[-1]),
-)
-fig.suptitle(f"{MODE}/{DIRECTION}/{WINDOW} — significance calendar  ({MODEL})", y=1.02, fontsize=13)
-plt.show()
-if fig_dir:
-    fig.savefig(fig_dir / "significance_calendar.png", dpi=200, bbox_inches="tight")
+# %% Loop 2 — Tract-aggregated choropleth (5 figures)
+for cfg in MODE_CONFIGS:
+    mode, direction = cfg["mode"], cfg["direction"]
+    print(f"=== tract aggregate: {mode}/{direction} ===")
+    out = output_dir(mode, MODEL, direction=direction, paths=paths)
+    tract_geojson = out / "causal" / "tract_effects.geojson"
+    if not tract_geojson.exists():
+        print(f"  SKIP — missing {tract_geojson} (run scripts.geospatial_analysis first)")
+        continue
+    tract_eff = gpd.read_file(tract_geojson)
 
-# %% Figure 4 — Time series of daily ATT (with PI shading)
-fig, ax = plot_effects_over_time(daily, mode="daily_att", title_prefix=f"{MODE.title()} ({MODEL})")
-plt.show()
-if fig_dir:
-    fig.savefig(fig_dir / "daily_att.png", dpi=200, bbox_inches="tight")
+    fig, ax = plot_choropleth(
+        tract_eff,
+        column=VALUE_COL,
+        crz_polygon=crz,
+        puma_polygon=puma,
+        cmap="RdBu_r",
+        legend_label="Mean daily ATT (rides/day)",
+        basemap=True,
+        figsize=(8, 8),
+        dpi=200,
+    )
+    _save(fig, f"tract_{_label(mode, direction)}")
+    plt.show()
 
-# %% Figure 5 — Cumulative relative ATT
-fig, ax = plot_effects_over_time(daily, mode="cum_rel", title_prefix=f"{MODE.title()} ({MODEL})")
-plt.show()
-if fig_dir:
-    fig.savefig(fig_dir / "cum_rel_att.png", dpi=200, bbox_inches="tight")
+print("Done." + (f" Figures under {FIG_DIR}" if SAVE_FIGS else ""))
 
-print("Done." + (f" Figures saved to {fig_dir}" if fig_dir else ""))
+# %%

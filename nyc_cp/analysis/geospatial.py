@@ -31,15 +31,45 @@ import pandas as pd
 TARGET_CRS = "EPSG:2263"
 
 
+def _add_basemap(ax, extent_gdf=None) -> None:
+    """Underlay a CartoDB Positron tile basemap. No-op if ``contextily`` missing.
+
+    Called **before** data layers are plotted (so data sits on top). Pass the
+    GDF whose bounds the map should cover via ``extent_gdf`` — required because
+    ax limits are still defaults before any artist is drawn. Also makes the
+    axes patch transparent so the basemap isn't hidden by mpl's default white
+    axes background.
+    """
+    try:
+        import contextily as cx
+    except ImportError:
+        return
+    if extent_gdf is not None and len(extent_gdf):
+        xmin, ymin, xmax, ymax = extent_gdf.to_crs(TARGET_CRS).total_bounds
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
+    ax.set_facecolor("none")
+    cx.add_basemap(
+        ax,
+        crs=TARGET_CRS,
+        source=cx.providers.CartoDB.Positron,
+        attribution=False,
+    )
+
+
 # --------------------------------------------------------------------- CRZ ---
 
 
 def classify_crz(gdf, crz_polygon, kind: Literal["routes", "tracts", "stations"], tract_share_threshold: float = 0.5):
     """Tag each row with its CRZ relationship.
 
-    * ``routes``   — three classes via ``within`` / ``intersects``
-    * ``tracts``   — binary by intersection-area share
-    * ``stations`` — binary by ``within``
+    * ``routes``   — three classes (``fully_inside`` / ``partially_inside`` /
+                     ``fully_outside``) — keeps the partial-crossing routes as
+                     a distinct group because their behaviour (small/negative
+                     ATT) differs materially from fully-inside (~+11%) and
+                     fully-outside (~+8%) routes.
+    * ``tracts``   — binary by intersection-area share.
+    * ``stations`` — binary by ``within``.
     """
     import geopandas as gpd  # noqa: F401
 
@@ -123,11 +153,13 @@ def plot_choropleth(
     gdf,
     column: str,
     crz_polygon=None,
+    puma_polygon=None,
     cmap: str = "Reds",
     legend_label: str | None = None,
     quantile_clip: tuple[float, float] = (0.02, 0.98),
     diverging: bool | None = None,
     center: float = 0.0,
+    basemap: bool = False,
     ax=None,
     figsize=(10, 10),
     dpi: int = 300,
@@ -157,7 +189,7 @@ def plot_choropleth(
         # All NaN — usually a broken upstream join. Render only the missing
         # polygons so the user can see the geometry without crashing.
         if not missing.empty:
-            missing.plot(ax=ax, color="lightgrey", linewidth=0.4)
+            missing.plot(ax=ax, color="white", edgecolor="dimgrey", linewidth=0.25)
         if crz_polygon is not None:
             crz_polygon.to_crs(TARGET_CRS).boundary.plot(ax=ax, color="red", linewidth=2)
         ax.set_axis_off()
@@ -170,7 +202,11 @@ def plot_choropleth(
     if diverging is None:
         diverging = bool((vals.min() < center) and (vals.max() > center))
 
-    plot_kwargs = dict(column=column, cmap=cmap, linewidth=0.4, legend=True)
+    plot_kwargs = dict(
+        column=column, cmap=cmap,
+        edgecolor="dimgrey", linewidth=0.25,
+        legend=True, legend_kwds={"shrink": 0.5, "aspect": 30},
+    )
     if diverging:
         from matplotlib.colors import TwoSlopeNorm
 
@@ -182,9 +218,19 @@ def plot_choropleth(
     else:
         plot_kwargs["vmin"], plot_kwargs["vmax"] = vmin, vmax
 
+    # Basemap drawn FIRST so data layers sit on top.
+    if basemap:
+        _add_basemap(ax, extent_gdf=gdf)
+
     if not missing.empty:
-        missing.plot(ax=ax, color="lightgrey", linewidth=0.4)
+        missing_face = "none" if basemap else "white"
+        missing.plot(ax=ax, facecolor=missing_face, edgecolor="dimgrey", linewidth=0.25)
     valid.plot(ax=ax, **plot_kwargs)
+
+    if puma_polygon is not None:
+        puma_polygon.to_crs(TARGET_CRS).plot(
+            ax=ax, facecolor="none", edgecolor="black", linewidth=0.9
+        )
 
     if crz_polygon is not None:
         crz_polygon.to_crs(TARGET_CRS).boundary.plot(ax=ax, color="red", linewidth=2)
@@ -202,6 +248,7 @@ def plot_unit_effects(
     join_col: str,
     value_col: str = "att",
     crz_polygon=None,
+    puma_polygon=None,
     base_layer=None,
     cmap: str = "RdBu_r",
     legend_label: str | None = None,
@@ -211,6 +258,7 @@ def plot_unit_effects(
     point_size: float = 30.0,
     point_size_by_abs: bool = False,
     line_width: float = 2.0,
+    basemap: bool = False,
     ax=None,
     figsize=(11, 11),
     dpi: int = 300,
@@ -257,8 +305,17 @@ def plot_unit_effects(
     merged = units.merge(eff[[join_col, value_col]], on=join_col, how="left")
 
     merged = merged.to_crs(TARGET_CRS)
+
+    # Basemap drawn FIRST (before any data) so tract/route/point layers sit on top.
+    if basemap:
+        _add_basemap(ax, extent_gdf=base_layer if base_layer is not None else merged)
+
     if base_layer is not None:
-        base_layer.to_crs(TARGET_CRS).plot(ax=ax, color="whitesmoke", edgecolor="lightgray", linewidth=0.3)
+        # When basemap is on, only draw tract outlines so the tiles show through.
+        base_face = "none" if basemap else "white"
+        base_layer.to_crs(TARGET_CRS).plot(
+            ax=ax, facecolor=base_face, edgecolor="dimgrey", linewidth=0.25
+        )
 
     valid = merged[~merged[value_col].isna()]
     if valid.empty:
@@ -280,20 +337,32 @@ def plot_unit_effects(
     else:
         plot_kwargs = {"vmin": vmin, "vmax": vmax}
 
+    legend_kwds = {"shrink": 0.5, "aspect": 30}
     geom_kind = valid.geometry.geom_type.iloc[0]
     if geom_kind in ("Point", "MultiPoint"):
         if point_size_by_abs:
+            # Quadratic scaling on |val| so the size ratio between largest and
+            # smallest dots is visually dramatic (~50× rather than ~7×).
             mag = vals.abs()
             mag_max = mag.max() or 1.0
-            sizes = (point_size * 0.3) + (mag / mag_max) * point_size * 2.0
+            sizes = (point_size * 0.1) + ((mag / mag_max) ** 1.5) * point_size * 5.0
         else:
             sizes = point_size
-        valid.plot(ax=ax, column=value_col, cmap=cmap, markersize=sizes, legend=True,
-                   edgecolor="black", linewidth=0.4, **plot_kwargs)
+        valid.plot(ax=ax, column=value_col, cmap=cmap, markersize=sizes,
+                   edgecolor="none", linewidth=0,
+                   legend=True, legend_kwds=legend_kwds, **plot_kwargs)
     elif geom_kind in ("LineString", "MultiLineString"):
-        valid.plot(ax=ax, column=value_col, cmap=cmap, linewidth=line_width, legend=True, **plot_kwargs)
+        valid.plot(ax=ax, column=value_col, cmap=cmap, linewidth=line_width,
+                   legend=True, legend_kwds=legend_kwds, **plot_kwargs)
     else:
-        valid.plot(ax=ax, column=value_col, cmap=cmap, linewidth=0.4, legend=True, **plot_kwargs)
+        valid.plot(ax=ax, column=value_col, cmap=cmap,
+                   edgecolor="dimgrey", linewidth=0.25,
+                   legend=True, legend_kwds=legend_kwds, **plot_kwargs)
+
+    if puma_polygon is not None:
+        puma_polygon.to_crs(TARGET_CRS).plot(
+            ax=ax, facecolor="none", edgecolor="black", linewidth=0.9
+        )
 
     if crz_polygon is not None:
         crz_polygon.to_crs(TARGET_CRS).boundary.plot(ax=ax, color="red", linewidth=2)
@@ -445,6 +514,9 @@ def summarize_effects_by_crz(
     cum_effect_col: str = "cum_effect",
     cum_cf_col: str = "cum_cf",
     signif_col: str = "att_signif",
+    cum_lo_col: str = "cum_effect_ci_lo",
+    cum_hi_col: str = "cum_effect_ci_hi",
+    coverage_level: float = 0.9,
 ) -> pd.DataFrame:
     """One row per CRZ class: count of units, count signif +/-, mean ATT,
     pooled cumulative ATT, and pooled relative effect = Σ cum_effect / Σ cum_cf.
@@ -459,9 +531,12 @@ def summarize_effects_by_crz(
     crz_in_target = crz_polygon.to_crs(TARGET_CRS) if hasattr(crz_polygon, "to_crs") else crz_polygon
     units = classify_crz(units.to_crs(TARGET_CRS), crz_in_target, kind=kind)
     cols = [join_col, att_col]
-    for c in (cum_effect_col, cum_cf_col, signif_col):
+    for c in (cum_effect_col, cum_cf_col, signif_col, cum_lo_col, cum_hi_col):
         if c in eff.columns: cols.append(c)
     merged = units.merge(eff[cols], on=join_col, how="left")
+
+    from scipy.stats import norm as _norm
+    z = float(_norm.ppf(0.5 + coverage_level / 2))
 
     rows = []
     for crz_class, grp in merged.groupby("crz_class"):
@@ -484,6 +559,21 @@ def summarize_effects_by_crz(
             row["total_cum_effect"] = cum_eff_sum
             row["total_cum_cf"] = cum_cf_sum
             row["pooled_relative_effect"] = cum_eff_sum / cum_cf_sum if cum_cf_sum else float("nan")
+            if cum_lo_col in valid.columns and cum_hi_col in valid.columns:
+                unit_se = (valid[cum_hi_col] - valid[cum_lo_col]) / (2 * z)
+                class_se = float(np.sqrt(float((unit_se ** 2).sum())))
+                row["total_cum_se"] = class_se
+                row["total_cum_lo"] = cum_eff_sum - z * class_se
+                row["total_cum_hi"] = cum_eff_sum + z * class_se
+                if cum_cf_sum:
+                    row["pooled_rel_lo"] = (cum_eff_sum - z * class_se) / cum_cf_sum
+                    row["pooled_rel_hi"] = (cum_eff_sum + z * class_se) / cum_cf_sum
+                else:
+                    row["pooled_rel_lo"] = float("nan")
+                    row["pooled_rel_hi"] = float("nan")
+                row["pooled_rel_signif"] = bool(
+                    (row["pooled_rel_lo"] > 0) or (row["pooled_rel_hi"] < 0)
+                )
         rows.append(row)
     return pd.DataFrame(rows).sort_values("crz_class").reset_index(drop=True)
 

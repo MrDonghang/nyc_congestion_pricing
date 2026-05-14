@@ -30,7 +30,7 @@ SUMMARY.mkdir(parents=True, exist_ok=True)
 
 HEADLINE = ["chronos", "chronos_qrcal", "chronos_qrcal_intercept",
             "timesfm", "timesfm_qrcal", "timesfm_qrcal_intercept"]
-MODE_DIRS = {"bus": ["all"], "subway": ["O", "D"], "replica": ["O", "D"], "citibike": ["O", "D"]}
+MODE_DIRS = {"bus": ["all"], "subway": ["O", "D", "total"], "replica": ["O", "D"], "citibike": ["O", "D"]}
 HEADLINE_BY_MODE = {
     "bus":      HEADLINE,
     "subway":   HEADLINE,

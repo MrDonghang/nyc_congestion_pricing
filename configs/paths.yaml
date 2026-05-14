@@ -16,7 +16,9 @@ modes:
   subway:
     actual: subway/subway_2023_2025_daily_{direction}.csv
     freq: D
-    directions: ["O", "D"]
+    # "total" = O + D per (station, day) — analyses overall ridership at each
+    # station regardless of whether the rider boarded or alighted there.
+    directions: ["O", "D", "total"]
   citibike:
     actual: citibike/census/citibike_censustract_od_2022_2025_NYC_{direction}.csv
     freq: D
