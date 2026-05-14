@@ -17,6 +17,7 @@ configs/paths.local.yaml
 # Outputs (generated)
 outputs/
 logs/
+lightning_logs/   # PyTorch Lightning's default per-run hparams/metrics/checkpoints dir
 
 # Editor
 .vscode/
