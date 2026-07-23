@@ -1,9 +1,0 @@
-# GPU 3 — citibike O + D
-citibike O pcn val
-citibike O pcn test
-citibike O deepar val
-citibike O deepar test
-citibike D pcn val
-citibike D pcn test
-citibike D deepar val
-citibike D deepar test

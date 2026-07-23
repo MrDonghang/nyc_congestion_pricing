@@ -1,5 +1,0 @@
-# CPU arima 2 — replica
-replica O arima val
-replica O arima test
-replica D arima val
-replica D arima test

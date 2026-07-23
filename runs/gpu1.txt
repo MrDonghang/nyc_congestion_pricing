@@ -1,9 +1,0 @@
-# GPU 1 — replica-O + bus
-replica O pcn val
-replica O pcn test
-replica O deepar val
-replica O deepar test
-bus all pcn val
-bus all pcn test
-bus all deepar val
-bus all deepar test

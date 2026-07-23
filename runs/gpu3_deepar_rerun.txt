@@ -1,7 +1,0 @@
-# GPU 3 — bus + citibike (smaller series count)
-bus all deepar val
-bus all deepar test
-citibike D deepar val
-citibike D deepar test
-citibike O deepar val
-citibike O deepar test

@@ -1,7 +1,0 @@
-# CPU arima 0 — bus + subway
-bus all arima val
-bus all arima test
-subway O arima val
-subway O arima test
-subway D arima val
-subway D arima test

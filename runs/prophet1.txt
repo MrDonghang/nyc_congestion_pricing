@@ -1,9 +1,0 @@
-# CPU prophet 1 — citibike + replica
-citibike O prophet val
-citibike O prophet test
-citibike D prophet val
-citibike D prophet test
-replica O prophet val
-replica O prophet test
-replica D prophet val
-replica D prophet test

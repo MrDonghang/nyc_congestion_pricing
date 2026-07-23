@@ -1,5 +1,0 @@
-# CPU arima 1 — citibike
-citibike O arima val
-citibike O arima test
-citibike D arima val
-citibike D arima test

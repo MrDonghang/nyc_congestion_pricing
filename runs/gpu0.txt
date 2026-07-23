@@ -1,5 +1,0 @@
-# GPU 0 — replica-D (heaviest single direction, 4311 series)
-replica D pcn val
-replica D pcn test
-replica D deepar val
-replica D deepar test

@@ -1,9 +1,0 @@
-# GPU 2 — subway O + D
-subway O pcn val
-subway O pcn test
-subway O deepar val
-subway O deepar test
-subway D pcn val
-subway D pcn test
-subway D deepar val
-subway D deepar test
