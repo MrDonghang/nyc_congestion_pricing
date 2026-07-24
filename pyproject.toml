@@ -1,0 +1,58 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nyc_cp"
+version = "0.1.0"
+description = "Counterfactual evaluation of NYC's Congestion Relief Zone tolling program."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Donghang" }]
+dependencies = [
+    "numpy",
+    "pandas",
+    "scipy",
+    "scikit-learn",
+    "matplotlib",
+    "seaborn",
+    "tqdm",
+    "pyyaml",
+    "joblib",
+    # Forecasting
+    "torch",
+    "lightning",                 # required by gluonts.torch.model.deepar
+    "gluonts[torch]",            # [torch] extra also installs lightning, kept explicit for clarity
+    "prophet",
+    "pmdarima",
+    "statsmodels",
+    "optuna",
+    # Foundation / neural forecasters
+    "chronos-forecasting>=2.0",  # amazon/chronos-2
+    "timesfm",                   # google/timesfm-2.0-500m-pytorch
+    "neuralforecast",            # NHITS, TFT
+    # Geospatial / causal
+    "geopandas",
+    "shapely",
+    "libpysal",
+    "spreg",
+    "xgboost",
+    "lightgbm",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "ipykernel"]
+
+[project.scripts]
+nyccp-process    = "scripts.process_data:main"
+nyccp-forecast   = "scripts.train_forecast:main"
+nyccp-compare    = "scripts.compare_models:main"
+nyccp-effects    = "scripts.compute_effects:main"
+nyccp-geo        = "scripts.geospatial_analysis:main"
+
+[tool.setuptools.packages.find]
+include = ["nyc_cp*", "scripts*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
