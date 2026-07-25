@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Counterfactual evaluation of NYC's Congestion Relief Zone tolling program."
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{ name = "Donghang" }]
+authors = [{ name = "Donghang Li" }]
 dependencies = [
     "numpy",
     "pandas",

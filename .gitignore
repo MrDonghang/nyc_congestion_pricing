@@ -16,6 +16,7 @@ configs/paths.local.yaml
 
 # Outputs (generated)
 outputs/
+demo_output/
 logs/
 lightning_logs/   # PyTorch Lightning's default per-run hparams/metrics/checkpoints dir
 
