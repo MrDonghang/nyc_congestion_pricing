@@ -2,7 +2,7 @@
 
 Counterfactual evaluation of New York City's Central Business District Tolling Program (the **Congestion Relief Zone**, effective **2025-01-05**) on transit and mobility patterns.
 
-Code accompanying the manuscript *"Congestion pricing reshapes multimodal travel demand in New York City"*.
+Code accompanying the manuscript *"Public transit gains and spatially uneven travel demand changes after NYC congestion pricing"*.
 
 The pipeline:
 
