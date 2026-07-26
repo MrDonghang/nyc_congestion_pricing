@@ -1,4 +1,4 @@
-"""Self-contained demo: counterfactual forecasting + treatment effects.
+"""Self-contained demo: counterfactual forecasting + policy effects.
 
 Runs the core pipeline end-to-end on the real processed MTA bus panel shipped
 in ``demo_data/`` (246 routes, 2022-01-07 → 2025-04-30, the same panel used in
@@ -9,7 +9,7 @@ the paper) — no external data, no config edits, no GPU required:
    zero-shot, using only pre-policy history,
 3. score forecast accuracy on a held-out pre-policy window (2024-01-05 →
    2024-04-30, no policy contamination),
-4. compute per-route and overall treatment effects (ATT) by comparing
+4. compute per-route and overall policy effects by comparing
    post-policy actuals to the counterfactual, and
 5. save forecast CSVs, an effects summary, and a per-route plot under
    ``demo_output/``.
@@ -95,7 +95,7 @@ val_metrics = evaluate_per_series(
 print(f"\nValidation accuracy (pre-policy window, medians across {actual.shape[1]} routes):")
 print(val_metrics.median().round(3).to_string())
 
-# %% 4. Treatment effects: post-policy actuals vs. counterfactual
+# %% 4. Policy effects: post-policy actuals vs. counterfactual
 df_long = build_long_df(actual.loc[POLICY_START:TEST_END], result.mu, result.lower, result.upper)
 df_eff = compute_effects(df_long)
 unit_summary = summarize_by_unit(df_eff)
@@ -103,7 +103,7 @@ overall = summarize_overall(unit_summary)
 
 print("\nPer-route cumulative effects (first 5):")
 print(unit_summary.head().round(2).to_string())
-print("\nOverall ATT summary:")
+print("\nOverall policy-effect summary:")
 print(overall.round(3).to_string())
 
 # %% 5. Save outputs

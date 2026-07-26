@@ -9,7 +9,7 @@ The pipeline:
 1. Builds **daily / weekly ridership matrices** for bus, subway OD, and Replica OD from the raw open-data feeds.
 2. Runs **forecasters** on pre-policy data and produces "no-policy" counterfactual forecasts with prediction intervals. The primary model is the time-series foundation model **TimesFM** (zero-shot), with **Chronos** as a robustness check; ARIMA, Prophet, DeepAR, PCN, BSTS, NHITS, and TFT are also wired up as baselines / comparisons.
 3. **Calibrates** the foundation-model outputs with **hierarchical quantile calibration (HQC)** — the paper's core method: a per-unit residual intercept plus pooled quantile regression fit on the validation window, then applied to the test horizon.
-4. Computes **per-unit treatment effects** (ATT) by comparing actuals to the calibrated counterfactuals.
+4. Computes **per-unit policy effects** — deviations of observed demand from the calibrated no-policy counterfactual.
 5. Maps effects to **census-tract demographics** through spatial regression and ML to identify who's most affected.
 
 ---
@@ -69,14 +69,14 @@ A small real dataset ships with the repo at [demo_data/bus_data_2022_2025_daily_
 python notebooks/00_demo.py
 ```
 
-The demo (1) zero-shot forecasts the post-policy window (2025-01-05 → 2025-04-30) with Chronos-2 using only pre-policy history, (2) scores forecast accuracy on a held-out pre-policy validation window (2024-01-05 → 2024-04-30), and (3) computes per-route and overall treatment effects (ATT). It uses Chronos (the paper's robustness model) rather than TimesFM because its weights are a much smaller download; the full HQC-TimesFM pipeline — the paper's main specification — is run via the CLIs in §4.
+The demo (1) zero-shot forecasts the post-policy window (2025-01-05 → 2025-04-30) with Chronos-2 using only pre-policy history, (2) scores forecast accuracy on a held-out pre-policy validation window (2024-01-05 → 2024-04-30), and (3) computes per-route and overall policy effects (deviations from the no-policy counterfactual). It uses Chronos (the paper's robustness model) rather than TimesFM because its weights are a much smaller download; the full HQC-TimesFM pipeline — the paper's main specification — is run via the CLIs in §4.
 
-**Expected output.** Console output reports per-route validation accuracy (median R² ≈ 0.80, 90%-PI coverage ≈ 0.92 across 246 routes) and the ATT summary (overall bus ridership ≈ +2% versus the no-policy counterfactual, significant at the 90% level). Files land in `demo_output/`:
+**Expected output.** Console output reports per-route validation accuracy (median R² ≈ 0.80, 90%-PI coverage ≈ 0.92 across 246 routes) and the policy-effect summary (overall bus ridership ≈ +2% versus the no-policy counterfactual, outside the 90% prediction interval). Files land in `demo_output/`:
 
 ```
 demo_cf_mu.csv / demo_cf_lower.csv / demo_cf_upper.csv   # counterfactual triplet
 demo_val_metrics.csv                                     # per-route accuracy metrics
-demo_effects_by_route.csv / demo_effects_overall.csv     # ATT summaries
+demo_effects_by_route.csv / demo_effects_overall.csv     # policy-effect summaries
 demo_forecast_<route>.png                                # forecast plot, busiest route
 ```
 
@@ -112,10 +112,10 @@ python -m scripts.calibrate_forecast --mode subway --base-model timesfm --per-un
 # 4. Compare model accuracy
 python -m scripts.compare_models  --mode bus --window test
 
-# 5. Counterfactual treatment effects — use the HQC-calibrated model
+# 5. Policy effects (observed vs. counterfactual) — use the HQC-calibrated model
 python -m scripts.compute_effects --mode bus --model timesfm_qrcal_intercept --window test
 
-# 6. Geospatial + causal regression
+# 6. Geospatial + demographic regression
 python -m scripts.geospatial_analysis --mode bus --model timesfm_qrcal_intercept --window test
 ```
 
@@ -123,7 +123,7 @@ python -m scripts.geospatial_analysis --mode bus --model timesfm_qrcal_intercept
 
 1. **Data.** Download the raw feeds listed in the paper's Data Availability statement (MTA Bus Hourly Ridership, MTA Subway Hourly + OD Estimate, Replica weekly OD) and run step 1 above for each mode to build the processed panels. The processed bus panel also ships with this repo at `demo_data/bus_data_2022_2025_daily_final.csv`.
 2. **Counterfactuals.** For each mode (`bus`, `subway`, `replica`) and each direction the mode supports, run step 2 for `timesfm` (primary) and `chronos` (robustness) on both `val` and `test`, then step 3 **with `--per-unit-intercept`** to produce the paper's headline models `timesfm_qrcal_intercept` (**HQC-TimesFM**) / `chronos_qrcal_intercept` (**HQC-Chronos**). Baseline models (`arima`, `prophet`, `deepar`, `pcn`, `bsts`, `nhits`, `tft`) and the alternative calibrations (global QR: no flag; fully per-unit QR: `--per-unit`) enter the accuracy comparisons reported in the SI.
-3. **Effects & spatial analysis.** Run steps 5–6 with `--model timesfm_qrcal_intercept` to produce the ATT tables/maps and the demographic regressions.
+3. **Effects & spatial analysis.** Run steps 5–6 with `--model timesfm_qrcal_intercept` to produce the policy-effect tables/maps and the demographic regressions.
 4. **Determinism.** All stochastic components are seeded (`nyc_cp.utils.set_seed(42)`); the headline TimesFM/Chronos forecasts are zero-shot (no training), so results are reproducible up to library/hardware numerics.
 
 Forecast windows per mode (defined in `configs/modes/<mode>.yaml`):
@@ -176,7 +176,7 @@ nyc_congestion_pricing/
 │   ├── models/                   # BaseForecaster + all forecasters
 │   ├── tuning/                   # Optuna search helpers
 │   ├── evaluation/               # metrics + plot helpers
-│   └── analysis/                 # ATT pipeline + spatial + causal regression
+│   └── analysis/                 # policy-effect pipeline + spatial/demographic regression
 │
 ├── scripts/                      # thin CLIs (process_data, train_forecast,
 │                                 #   calibrate_forecast, compare_models,
@@ -258,7 +258,7 @@ Forecast triplets land at `<output_root>/<mode>/<model>/[<direction>/]`:
 
 Calibrated outputs live alongside the originals under `<output_root>/<mode>/<base>_qrcal_intercept/[<direction>/]` (HQC; `_qrcal` / `_qrcal_perunit` for the comparison calibrations) with the same `_mu / _lower / _upper` triplet naming (no `_evaluation.csv` from the calibration step itself).
 
-ATT outputs land under `.../effects/`; spatial-regression outputs under `.../causal/`.
+Policy-effect outputs land under `.../effects/`; spatial-regression outputs under `.../causal/`.
 
 ## Tests
 
