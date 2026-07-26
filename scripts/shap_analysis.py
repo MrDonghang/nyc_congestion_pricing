@@ -33,7 +33,7 @@ log = logging.getLogger("shap_analysis")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
+    p.add_argument("--mode", required=True, choices=["bus", "subway", "replica"])
     p.add_argument("--model", required=True)
     p.add_argument("--window", required=True, choices=["val", "validation", "test"])
     p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")

@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this code, please cite the accompanying paper."
-title: "NYC Congestion Pricing: counterfactual evaluation of the Congestion Relief Zone"
+title: "Public transit gains and spatially uneven travel demand changes after NYC congestion pricing"
 type: software
 authors:
   - family-names: Li
@@ -9,7 +9,7 @@ repository-code: "https://github.com/MrDonghang/nyc_congestion_pricing"
 license: MIT
 preferred-citation:
   type: article
-  title: "Congestion pricing reshapes multimodal travel demand in New York City"
+  title: "Public transit gains and spatially uneven travel demand changes after NYC congestion pricing"
   authors:
     - family-names: Li
       given-names: Donghang

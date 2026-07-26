@@ -6,10 +6,6 @@ Examples
         --hourly-2020-2024 /raw/MTA_Bus_Hourly_2020_2024.csv \\
         --hourly-2025      /raw/MTA_Bus_Hourly_2025.csv
 
-    python -m scripts.process_data --mode citibike \\
-        --raw-dir /raw/citibike/  --census-shp /geo/NYC_Census_Tracts_2020.shp \\
-        --region NYC
-
     python -m scripts.process_data --mode subway \\
         --od-estimate /raw/MTA_Subway_OD_Estimate.csv \\
         --hourly /raw/MTA_Subway_Hourly_2020_2024.csv  /raw/MTA_Subway_Hourly_2025.csv
@@ -35,17 +31,12 @@ log = logging.getLogger("process_data")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
+    p.add_argument("--mode", required=True, choices=["bus", "subway", "replica"])
     p.add_argument("--output-dir", type=Path, default=None)
 
     # Bus
     p.add_argument("--hourly-2020-2024", type=Path)
     p.add_argument("--hourly-2025", type=Path)
-
-    # Citibike
-    p.add_argument("--raw-dir", type=Path)
-    p.add_argument("--census-shp", type=Path)
-    p.add_argument("--region", choices=["NYC", "JC"], default="NYC")
 
     # Subway
     p.add_argument("--od-estimate", type=Path)
@@ -54,6 +45,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--region-name", choices=["census", "puma"], default="census")
 
     # Replica
+    p.add_argument("--raw-dir", type=Path)
     p.add_argument("--geo-csv", type=Path)
     p.add_argument("--geo-level", choices=["census_tract", "puma"], default="census_tract")
     p.add_argument("--by-mode", action="store_true")
@@ -74,14 +66,6 @@ def main() -> None:
         if not (args.hourly_2020_2024 and args.hourly_2025):
             raise SystemExit("--hourly-2020-2024 and --hourly-2025 are required for bus.")
         process(args.hourly_2020_2024, args.hourly_2025, out)
-
-    elif args.mode == "citibike":
-        from nyc_cp.data.citibike import process
-
-        if not (args.raw_dir and args.census_shp):
-            raise SystemExit("--raw-dir and --census-shp are required for citibike.")
-        out = args.output_dir or Path(paths["data_root"]) / "citibike" / "census"
-        process(args.raw_dir, args.census_shp, out, region=args.region)
 
     elif args.mode == "subway":
         from nyc_cp.data.subway import process

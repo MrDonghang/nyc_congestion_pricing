@@ -5,7 +5,7 @@ A run is described by three configs:
   - modes/<mode>.yaml  (per-mode preprocessing knobs + forecast windows)
   - models/<name>.yaml (per-model hyperparameters)
 
-Forecast windows are per-mode because citibike and replica do not share the
+Forecast windows are per-mode because replica does not share the
 year-displaced validation window that bus/subway use.
 
 Local overrides go in configs/paths.local.yaml (gitignored).

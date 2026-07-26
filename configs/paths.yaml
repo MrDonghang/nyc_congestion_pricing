@@ -19,14 +19,10 @@ modes:
     # "total" = O + D per (station, day) — analyses overall ridership at each
     # station regardless of whether the rider boarded or alighted there.
     directions: ["O", "D", "total"]
-  citibike:
-    actual: citibike/census/citibike_censustract_od_2022_2025_NYC_{direction}.csv
-    freq: D
-    directions: ["O", "D"]
   replica:
     actual: replica/od/census_tract_{direction_long}_matrix.csv
     freq: W
     directions: ["O", "D"]
 
 # Forecast windows live per-mode in configs/modes/<mode>.yaml — they are not the same
-# across modes (citibike and replica use different validation horizons than bus/subway).
+# across modes (replica uses a different validation horizon than bus/subway).

@@ -8,7 +8,6 @@ Examples
 --------
     python -m scripts.compare_models --mode bus      --window val
     python -m scripts.compare_models --mode subway   --window val --direction O
-    python -m scripts.compare_models --mode citibike --window test --direction D
 """
 
 from __future__ import annotations
@@ -30,7 +29,7 @@ log = logging.getLogger("compare_models")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
+    p.add_argument("--mode", required=True, choices=["bus", "subway", "replica"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")
     p.add_argument("--models", nargs="+", default=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts"])

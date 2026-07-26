@@ -23,7 +23,7 @@ from nyc_cp.config import get_window, load_mode, load_paths, output_dir
 from nyc_cp.data import load_actual
 
 # ---- Edit these to point at the (mode, direction, window, series) you want.
-MODE = "bus"          # "bus" | "subway" | "citibike" | "replica"
+MODE = "bus"          # "bus" | "subway" | "replica"
 DIRECTION = "all"          # "all" | "O" | "D"
 WINDOW = "val"          # "val" | "test"
 SERIES: str | int = 1    # column name (str) or positional index (int)

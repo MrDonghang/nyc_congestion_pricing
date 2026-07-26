@@ -4,7 +4,7 @@ Steps
 -----
 1. Load the per-unit ATT summary written by ``compute_effects.py``.
 2. Spatially join unit effects to census tracts (bus stops / subway stations
-   / Citibike already-tract-keyed).
+   / Replica already-tract-keyed).
 3. Build ACS-derived demographic features per tract.
 4. Run VIF filter + OLS / ML_Lag / ML_Error spatial regressions and tree-based
    ML (RF / XGB / LightGBM) on the tract-level effect.
@@ -64,7 +64,7 @@ DISPLAY_NAME = {
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
+    p.add_argument("--mode", required=True, choices=["bus", "subway", "replica"])
     p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts", "chronos_qrcal", "timesfm_qrcal", "chronos_qrcal_perunit", "timesfm_qrcal_perunit", "chronos_qrcal_intercept", "timesfm_qrcal_intercept", "chronos_qrcal_oos", "timesfm_qrcal_oos", "chronos_qrcal_intercept_oos", "timesfm_qrcal_intercept_oos"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")
@@ -82,7 +82,7 @@ def _load_geo(geo_root: Path):
     import geopandas as gpd
 
     # The tract shapefile ships with lowercase ``geoid``; downstream code
-    # (map_units_to_tracts, the citibike merge) defaults to ``GEOID``.
+    # (map_units_to_tracts, the replica merge) defaults to ``GEOID``.
     # Normalize once at load so every consumer sees the same name.
     tracts = gpd.read_file(geo_root / "NYC_Census_Tracts_2020" / "NYC_Census_Tracts_2020.shp")
     if "GEOID" not in tracts.columns:
@@ -147,32 +147,6 @@ def _tract_effects(args, paths, geo) -> "geopandas.GeoDataFrame":
         tracts["GEOID"] = tracts["GEOID"].astype(str)
         return tracts.merge(unit, left_on="GEOID", right_on="tract_id", how="left")
 
-    if args.mode == "citibike":
-        # citibike units are tract-indexed by *integer position*, not FIPS GEOID.
-        # The processing step (nyc_cp.data.citibike) builds an index over 6-digit
-        # ct2020 codes (which are not unique across NYC's 5 boroughs — e.g. 000100
-        # exists in Manhattan, Brooklyn, and Bronx), so 1530 indices cover ~2325
-        # tracts. Recover the mapping from the pkl saved at processing time and
-        # merge on ``ct2020``: a single citibike tract_id thus paints every
-        # borough's tract that shares the ct2020 with the same ATT value, which
-        # is the honest rendering given the lossy upstream index.
-        import pickle
-        unit = unit.rename(columns={unit.columns[0]: "tract_id"}) if unit.columns[0] != "tract_id" else unit
-        pkl_path = Path(paths["data_root"]) / "citibike" / "census" / "censustract_idx_mapping.pkl"
-        if not pkl_path.exists():
-            raise SystemExit(
-                f"citibike index mapping pkl not found at {pkl_path}. "
-                "Re-run nyc_cp.data.citibike.process to regenerate."
-            )
-        with open(pkl_path, "rb") as f:
-            idx_map = pickle.load(f)            # ct2020 (str) -> idx (int)
-        inv = {v: k for k, v in idx_map.items()}  # idx -> ct2020
-        unit["ct2020"] = unit["tract_id"].astype(int).map(inv)
-        unit = unit.dropna(subset=["ct2020"])
-        tracts = geo["tracts"].copy()
-        tracts["ct2020"] = tracts["ct2020"].astype(str)
-        return tracts.merge(unit, on="ct2020", how="left")
-
     raise SystemExit(f"Unsupported mode for spatial mapping: {args.mode}")
 
 
@@ -223,21 +197,13 @@ def main() -> None:
         units_gdf["station_id"] = units_gdf["station_id"].astype(str)
         join_col = "station_id"
         kind = "stations"
-    elif args.mode == "replica":
+    else:  # replica
         # Replica unit is the tract itself (GEOID-keyed). Use the NYC tract
         # polygons directly so that CRZ classification is by polygon-share.
         units_gdf = geo["tracts"].copy()
         units_gdf["GEOID"] = units_gdf["GEOID"].astype(str)
         units_gdf = units_gdf.rename(columns={"GEOID": "tract_id"})
         join_col = "tract_id"
-        kind = "tracts"
-    else:  # citibike — units are tract polygons; reuse the tract_eff result
-        # tract_eff already has merged effect columns (att, signif, etc.); the
-        # downstream plotting helpers do their own merge against `unit`, so
-        # we'd get att_x / att_y suffixes. Keep only geometry + join key here.
-        keep = ["tract_id", "geometry"] if "tract_id" in tract_eff.columns else [id_col, "geometry"]
-        units_gdf = tract_eff[keep].copy()
-        join_col = keep[0]
         kind = "tracts"
 
     crz_polygon = geo["crz"]
@@ -332,7 +298,7 @@ def main() -> None:
     except Exception as e:
         log.warning("Failed unit_effects_map.png: %s", e)
 
-    # (d) — tract-level choropleth (aggregate); skip for replica/citibike where
+    # (d) — tract-level choropleth (aggregate); skip for replica where
     # units already are tracts (the unit map IS the tract map).
     if args.mode in ("bus", "subway"):
         try:

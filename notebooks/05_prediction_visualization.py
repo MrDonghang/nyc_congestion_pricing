@@ -21,7 +21,7 @@ from nyc_cp.config import get_window, load_paths, output_dir
 from nyc_cp.data import load_actual
 
 # ---- Edit these ------------------------------------------------------------
-MODE = "bus"                           # "bus" | "subway" | "citibike" | "replica"
+MODE = "bus"                           # "bus" | "subway" | "replica"
 DIRECTION = "all"                      # "all" for bus, "O" / "D" for OD modes
 MODELS = ["timesfm_qrcal_intercept"]   # one or more model names
 WINDOWS = ["val", "test"]              # generate both validation and test figures

@@ -99,30 +99,10 @@ def _load_replica_geo() -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(out, geometry="geometry", crs=4326)
 
 
-def _load_citibike_geo() -> gpd.GeoDataFrame:
-    # Citibike units are integer indices 0–1529 mapped via pkl to 6-digit
-    # ct2020 codes. Multiple physical tracts (one per borough) can share the
-    # same ct2020, so each unit_id maps to ≥1 polygon.
-    import pickle
-    pkl_path = Path("/public_dataset/donghang/nyc_congestion_pricing/data_processed/citibike/census/censustract_idx_mapping.pkl")
-    with open(pkl_path, "rb") as f:
-        idx_map = pickle.load(f)            # ct2020 (str) -> idx (int)
-    inv = {str(v): k for k, v in idx_map.items()}  # idx (str) -> ct2020 (str)
-    g = gpd.read_file(TRACT_SHP).to_crs(4326)
-    g["ct2020"] = g["ct2020"].astype(str)
-    rows = []
-    for unit_id_str, ct in inv.items():
-        match = g[g["ct2020"] == ct]
-        for _, r in match.iterrows():
-            rows.append({"unit_id": unit_id_str, "name": "", "borough": "", "line": "", "geometry": r["geometry"]})
-    return gpd.GeoDataFrame(rows, geometry="geometry", crs=4326)
-
-
 MODE_CONFIG = {
     "bus":      {"directions": ["all"],   "id_col": "route_id",      "geo_kind": "line",    "geo_loader": _load_bus_geo,      "freq_label": "daily"},
     "subway":   {"directions": ["O", "D", "total"], "id_col": "station_index", "geo_kind": "point",   "geo_loader": _load_subway_geo,   "freq_label": "daily"},
     "replica":  {"directions": ["O", "D"], "id_col": "tract_id",      "geo_kind": "polygon", "geo_loader": _load_replica_geo,  "freq_label": "weekly"},
-    "citibike": {"directions": ["O", "D"], "id_col": "tract_id",      "geo_kind": "polygon", "geo_loader": _load_citibike_geo, "freq_label": "daily"},
 }
 if MODE not in MODE_CONFIG:
     raise SystemExit(f"Unknown MODE={MODE!r}. Pick one of {list(MODE_CONFIG)}.")

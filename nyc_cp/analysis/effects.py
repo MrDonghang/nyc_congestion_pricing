@@ -3,7 +3,7 @@
 Given an *actual* series and a *counterfactual* forecast (mean + lower / upper
 prediction interval), compute per-unit per-day effects, daily / cumulative
 aggregates, and per-unit summaries — all parameterised by ``id_col`` so the
-same code works for bus routes, subway stations, and citibike tracts.
+same code works for bus routes, subway stations, and census tracts.
 
 Sign convention
 ---------------

@@ -41,12 +41,12 @@ from nyc_cp.utils import setup_logging
 
 log = logging.getLogger("calibrate_forecast")
 
-ID_COL_BY_MODE = {"bus": "route_id", "subway": "station_id", "citibike": "tract_id", "replica": "tract_id"}
+ID_COL_BY_MODE = {"bus": "route_id", "subway": "station_id", "replica": "tract_id"}
 
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
+    p.add_argument("--mode", required=True, choices=["bus", "subway", "replica"])
     p.add_argument("--base-model", required=True, help="Base forecaster whose outputs we calibrate (e.g. chronos).")
     p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")
     p.add_argument("--coverage", type=float, default=0.9)

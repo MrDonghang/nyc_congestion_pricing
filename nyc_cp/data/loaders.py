@@ -1,6 +1,6 @@
 """Read pre-processed daily/weekly ridership matrices for any mode.
 
-Raw → matrix conversion lives in ``nyc_cp.data.{bus,subway,citibike,replica}``;
+Raw → matrix conversion lives in ``nyc_cp.data.{bus,subway,replica}``;
 this module is *only* about loading the already-processed wide CSVs.
 """
 

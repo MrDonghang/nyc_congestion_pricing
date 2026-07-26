@@ -1,9 +1,10 @@
 """Self-contained demo: counterfactual forecasting + treatment effects.
 
-Runs the core pipeline end-to-end on the small simulated dataset shipped in
-``demo_data/`` — no external data, no config edits, no GPU required:
+Runs the core pipeline end-to-end on the real processed MTA bus panel shipped
+in ``demo_data/`` (246 routes, 2022-01-07 → 2025-04-30, the same panel used in
+the paper) — no external data, no config edits, no GPU required:
 
-1. load the simulated daily ridership panel (20 routes, 2022 → 2025-04),
+1. load the daily ridership panel,
 2. forecast the post-policy window (2025-01-05 → 2025-04-30) with Chronos-2
    zero-shot, using only pre-policy history,
 3. score forecast accuracy on a held-out pre-policy window (2024-01-05 →
@@ -12,6 +13,10 @@ Runs the core pipeline end-to-end on the small simulated dataset shipped in
    post-policy actuals to the counterfactual, and
 5. save forecast CSVs, an effects summary, and a per-route plot under
    ``demo_output/``.
+
+The demo uses the (uncalibrated) Chronos-2 robustness model because its
+weights are a small download; the paper's main specification (HQC-TimesFM)
+is run via the CLIs documented in README §4.
 
 Run from the repo root (cells delimited by ``# %%`` also open as a notebook):
 
@@ -35,6 +40,7 @@ t0 = time.time()
 set_seed(42)
 
 REPO = Path(__file__).resolve().parents[1]
+DATA = REPO / "demo_data" / "bus_data_2022_2025_daily_final.csv"
 OUT = REPO / "demo_output"
 OUT.mkdir(exist_ok=True)
 
@@ -51,8 +57,9 @@ MODEL_CFG = {
     "coverage_level": 0.9,
 }
 
-# %% 1. Load the simulated panel
-actual = pd.read_csv(REPO / "demo_data" / "bus_demo_daily.csv", index_col="date", parse_dates=True)
+# %% 1. Load the daily ridership panel
+actual = pd.read_csv(DATA, index_col=0, parse_dates=True)
+actual.index.name = "date"
 print(f"Panel: {actual.shape[0]} days x {actual.shape[1]} routes "
       f"({actual.index[0].date()} → {actual.index[-1].date()})")
 
@@ -85,7 +92,7 @@ val_result = val_forecaster.fit_predict(
 val_metrics = evaluate_per_series(
     actual.loc[VAL_START:VAL_END], val_result.mu, val_result.lower, val_result.upper
 )
-print("\nValidation accuracy (pre-policy window, medians across 20 routes):")
+print(f"\nValidation accuracy (pre-policy window, medians across {actual.shape[1]} routes):")
 print(val_metrics.median().round(3).to_string())
 
 # %% 4. Treatment effects: post-policy actuals vs. counterfactual
@@ -107,9 +114,11 @@ val_metrics.to_csv(OUT / "demo_val_metrics.csv")
 unit_summary.to_csv(OUT / "demo_effects_by_route.csv")
 overall.to_csv(OUT / "demo_effects_overall.csv", index=False)
 
+busiest = int(actual.mean().to_numpy().argmax())   # plot the busiest route
+route_name = str(actual.columns[busiest])
 fig, _ = plot_forecast(actual.loc["2024-07-01":], result.mu, result.lower, result.upper,
-                       column=0, title_prefix="Demo:")
-fig.savefig(OUT / "demo_forecast_D01.png", dpi=150, bbox_inches="tight")
+                       column=busiest, title_prefix="Demo:")
+fig.savefig(OUT / f"demo_forecast_{route_name.replace('/', '-')}.png", dpi=150, bbox_inches="tight")
 
 print(f"\nOutputs written to {OUT}/")
 print(f"Total wall time: {time.time() - t0:.0f} s")

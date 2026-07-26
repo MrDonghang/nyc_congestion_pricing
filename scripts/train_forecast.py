@@ -4,7 +4,6 @@ Examples
 --------
     python -m scripts.train_forecast --mode bus      --model pcn     --window test
     python -m scripts.train_forecast --mode subway   --model deepar  --window val  --direction O
-    python -m scripts.train_forecast --mode citibike --model prophet --window val  --direction D
     python -m scripts.train_forecast --mode bus      --model pcn     --window test --from-checkpoint
 """
 
@@ -36,7 +35,7 @@ log = logging.getLogger("train_forecast")
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--mode", required=True, choices=["bus", "subway", "citibike", "replica"])
+    p.add_argument("--mode", required=True, choices=["bus", "subway", "replica"])
     p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")
