@@ -3,7 +3,7 @@
 Section 1 — Daily ATT comparison across three forecasters:
   * TimesFM (raw)
   * TimesFM-HQC (per-unit intercept + pooled quantile calibration)
-  * Chronos-HQC
+  * Chronos-Bolt-HQC
 
 One panel per (mode, direction); each panel overlays three lines with shaded
 90% prediction intervals on the test window.
@@ -42,7 +42,7 @@ WINDOW = "test"
 MODELS = [
     {"key": "timesfm",                  "label": "TimesFM",      "color": "#1F77B4"},
     {"key": "timesfm_qrcal_intercept",  "label": "TimesFM-HQC",  "color": "#D55E00"},
-    {"key": "chronos_qrcal_intercept",  "label": "Chronos-HQC",  "color": "#009E73"},
+    {"key": "chronos_bolt_qrcal_intercept",  "label": "Chronos-Bolt-HQC",  "color": "#009E73"},
 ]
 
 # Each combo gets one figure. Bus has only "all" direction.

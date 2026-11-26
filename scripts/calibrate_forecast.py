@@ -8,8 +8,8 @@ get calibrated ATT/PI tables.
 
 Example
 -------
-    python -m scripts.calibrate_forecast --mode subway --base-model chronos --direction O
-    python -m scripts.compute_effects --mode subway --model chronos_qrcal --window test --direction O
+    python -m scripts.calibrate_forecast --mode subway --base-model chronos_bolt --direction O
+    python -m scripts.compute_effects --mode subway --model chronos_bolt_qrcal --window test --direction O
 """
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ ID_COL_BY_MODE = {"bus": "route_id", "subway": "station_id", "replica": "tract_i
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", required=True, choices=["bus", "subway", "replica"])
-    p.add_argument("--base-model", required=True, help="Base forecaster whose outputs we calibrate (e.g. chronos).")
+    p.add_argument("--base-model", required=True, help="Base forecaster whose outputs we calibrate (e.g. chronos_bolt).")
     p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")
     p.add_argument("--coverage", type=float, default=0.9)
     p.add_argument("--alpha", type=float, default=1e-4, help="L1 regularization for QuantileRegressor.")

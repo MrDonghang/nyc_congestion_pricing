@@ -7,8 +7,8 @@ a CSV of per-feature mean(|SHAP|) for table use.
 
 Examples
 --------
-    python -m scripts.shap_analysis --mode bus --model chronos_qrcal_intercept --window test
-    python -m scripts.shap_analysis --mode replica --model chronos_qrcal_intercept --window test --direction O
+    python -m scripts.shap_analysis --mode bus --model chronos_bolt_qrcal_intercept --window test
+    python -m scripts.shap_analysis --mode replica --model chronos_bolt_qrcal_intercept --window test --direction O
 """
 
 from __future__ import annotations

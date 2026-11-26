@@ -49,11 +49,11 @@ log = logging.getLogger("geospatial_analysis")
 # Mapping from internal model id → publication-ready display name.
 # Used for figure titles and legend labels (not file paths).
 DISPLAY_NAME = {
-    "chronos":                            "Chronos (raw)",
-    "chronos_qrcal":                      "Chronos+QR",
-    "chronos_qrcal_oos":                  "Chronos+QR (OOS)",
-    "chronos_qrcal_intercept":            "HQC-Chronos",
-    "chronos_qrcal_intercept_oos":        "HQC-Chronos (OOS)",
+    "chronos_bolt":                            "Chronos-Bolt (raw)",
+    "chronos_bolt_qrcal":                      "Chronos-Bolt+QR",
+    "chronos_bolt_qrcal_oos":                  "Chronos-Bolt+QR (OOS)",
+    "chronos_bolt_qrcal_intercept":            "HQC-Chronos-Bolt",
+    "chronos_bolt_qrcal_intercept_oos":        "HQC-Chronos-Bolt (OOS)",
     "timesfm":                            "TimesFM (raw)",
     "timesfm_qrcal":                      "TimesFM+QR",
     "timesfm_qrcal_oos":                  "TimesFM+QR (OOS)",
@@ -65,7 +65,7 @@ DISPLAY_NAME = {
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", required=True, choices=["bus", "subway", "replica"])
-    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts", "chronos_qrcal", "timesfm_qrcal", "chronos_qrcal_perunit", "timesfm_qrcal_perunit", "chronos_qrcal_intercept", "timesfm_qrcal_intercept", "chronos_qrcal_oos", "timesfm_qrcal_oos", "chronos_qrcal_intercept_oos", "timesfm_qrcal_intercept_oos"])
+    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos_bolt", "timesfm", "nhits", "tft", "bsts", "chronos_bolt_qrcal", "timesfm_qrcal", "chronos_bolt_qrcal_perunit", "timesfm_qrcal_perunit", "chronos_bolt_qrcal_intercept", "timesfm_qrcal_intercept", "chronos_bolt_qrcal_oos", "timesfm_qrcal_oos", "chronos_bolt_qrcal_intercept_oos", "timesfm_qrcal_intercept_oos"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")
     p.add_argument("--y-col", default="att", help="Tract-level outcome column for regressions.")

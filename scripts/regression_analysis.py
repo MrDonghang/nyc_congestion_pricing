@@ -29,7 +29,7 @@ from nyc_cp.utils import setup_logging
 
 log = logging.getLogger("ml_lag_paper")
 
-MODEL = "chronos_qrcal_intercept"
+MODEL = "chronos_bolt_qrcal_intercept"
 WINDOW = "test"
 Y_COL = "att"
 VIF_THRESHOLD = 20.0

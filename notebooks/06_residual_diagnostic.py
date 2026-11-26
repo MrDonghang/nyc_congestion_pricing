@@ -7,7 +7,7 @@
 # %% [markdown]
 # # Val residual diagnostic — shared across modes (bus / subway / replica)
 #
-# For the **6 headline models** (Chronos × {raw, qrcal, qrcal_intercept} +
+# For the **6 headline models** (Chronos-Bolt × {raw, qrcal, qrcal_intercept} +
 # TimesFM × {raw, qrcal, qrcal_intercept}) on the val window, produces a
 # standardized panel of diagnostics:
 #
@@ -48,9 +48,9 @@ COVERAGE_LEVEL = 0.9
 
 # 6 headline models — same across all modes
 MODELS = [
-    ("chronos (raw)",            "chronos"),
-    ("chronos_qrcal",            "chronos_qrcal"),
-    ("chronos_qrcal_intercept",  "chronos_qrcal_intercept"),
+    ("chronos_bolt (raw)",            "chronos_bolt"),
+    ("chronos_bolt_qrcal",            "chronos_bolt_qrcal"),
+    ("chronos_bolt_qrcal_intercept",  "chronos_bolt_qrcal_intercept"),
     ("timesfm (raw)",            "timesfm"),
     ("timesfm_qrcal",            "timesfm_qrcal"),
     ("timesfm_qrcal_intercept",  "timesfm_qrcal_intercept"),

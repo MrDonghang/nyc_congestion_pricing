@@ -28,7 +28,7 @@ DIRECTION = "all"          # "all" | "O" | "D"
 WINDOW = "val"          # "val" | "test"
 SERIES: str | int = 1    # column name (str) or positional index (int)
 MODELS = ["arima", "prophet", "deepar", "pcn",
-          "chronos", "timesfm", "nhits", "tft", "bsts"]
+          "chronos_bolt", "timesfm", "nhits", "tft", "bsts"]
 HISTORY_TAIL_DAYS = 180  # how many days of pre-window history to draw
 
 # %% Load truth and every available forecast triplet

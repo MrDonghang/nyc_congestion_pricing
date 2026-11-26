@@ -28,7 +28,7 @@ dependencies = [
     "statsmodels",
     "optuna",
     # Foundation / neural forecasters
-    "chronos-forecasting>=2.0",  # amazon/chronos-2
+    "chronos-forecasting>=2.0",  # amazon/chronos-bolt-base
     "timesfm[torch]>=1.2.7,<2",  # google/timesfm-2.0-500m-pytorch; 2.x on PyPI is a breaking new API
     "neuralforecast",            # NHITS, TFT
     # Geospatial / causal

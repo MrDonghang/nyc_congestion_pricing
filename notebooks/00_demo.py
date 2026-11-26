@@ -5,7 +5,7 @@ in ``demo_data/`` (246 routes, 2022-01-07 → 2025-04-30, the same panel used in
 the paper) — no external data, no config edits, no GPU required:
 
 1. load the daily ridership panel,
-2. forecast the post-policy window (2025-01-05 → 2025-04-30) with Chronos-2
+2. forecast the post-policy window (2025-01-05 → 2025-04-30) with Chronos-Bolt
    zero-shot, using only pre-policy history,
 3. score forecast accuracy on a held-out pre-policy window (2024-01-05 →
    2024-04-30, no policy contamination),
@@ -14,15 +14,16 @@ the paper) — no external data, no config edits, no GPU required:
 5. save forecast CSVs, an effects summary, and a per-route plot under
    ``demo_output/``.
 
-The demo uses the (uncalibrated) Chronos-2 robustness model because its
-weights are a small download; the paper's main specification (HQC-TimesFM)
-is run via the CLIs documented in README §4.
+The demo is a quick check of the installation with a single forecast window and
+no calibration; the specification behind the manuscript's results (rolling
+origins, quantile-regression calibration, placebo inference) is in
+``runs/revision/``.
 
 Run from the repo root (cells delimited by ``# %%`` also open as a notebook):
 
     python notebooks/00_demo.py
 
-First run downloads the Chronos-2 weights (~460 MB) from Hugging Face.
+First run downloads the Chronos-Bolt weights (~780 MB) from Hugging Face.
 """
 
 # %% Setup
@@ -50,10 +51,9 @@ VAL_START, VAL_END = pd.Timestamp("2024-01-05"), pd.Timestamp("2024-04-30")
 
 MODEL_CFG = {
     "type": "chronos",
-    "model_id": "amazon/chronos-2",
+    "model_id": "amazon/chronos-bolt-base",
     "device": "cpu",        # demo is CPU-only so it runs on any machine
     "dtype": "float32",
-    "batch_size": 32,
     "coverage_level": 0.9,
 }
 

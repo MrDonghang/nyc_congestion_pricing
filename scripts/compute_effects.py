@@ -46,7 +46,7 @@ ID_COL_BY_MODE = {
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--mode", required=True, choices=["bus", "subway", "replica"])
-    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos", "timesfm", "nhits", "tft", "bsts", "chronos_qrcal", "timesfm_qrcal", "chronos_qrcal_perunit", "timesfm_qrcal_perunit", "chronos_qrcal_intercept", "timesfm_qrcal_intercept", "chronos_qrcal_oos", "timesfm_qrcal_oos", "chronos_qrcal_intercept_oos", "timesfm_qrcal_intercept_oos"])
+    p.add_argument("--model", required=True, choices=["arima", "prophet", "deepar", "pcn", "chronos_bolt", "timesfm", "nhits", "tft", "bsts", "chronos_bolt_qrcal", "timesfm_qrcal", "chronos_bolt_qrcal_perunit", "timesfm_qrcal_perunit", "chronos_bolt_qrcal_intercept", "timesfm_qrcal_intercept", "chronos_bolt_qrcal_oos", "timesfm_qrcal_oos", "chronos_bolt_qrcal_intercept_oos", "timesfm_qrcal_intercept_oos"])
     p.add_argument("--window", required=True, choices=["val", "validation", "test"], help="Forecast window (val and validation are aliases).")
     p.add_argument("--direction", choices=["all", "O", "D", "total"], default="all")
     p.add_argument("--id-col", default=None, help="Override the unit-id column name (defaults per mode).")

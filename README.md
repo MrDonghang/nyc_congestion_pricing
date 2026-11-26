@@ -71,9 +71,9 @@ A small real dataset ships with the repo at [demo_data/bus_data_2022_2025_daily_
 python notebooks/00_demo.py
 ```
 
-The demo (1) zero-shot forecasts the post-policy window (2025-01-05 → 2025-04-30) with Chronos-2 using only pre-policy history, (2) scores forecast accuracy on a held-out pre-policy validation window (2024-01-05 → 2024-04-30), and (3) computes per-route and overall policy effects (deviations from the no-policy counterfactual). The demo is a quick, CPU-only check of the installation and uses Chronos-2 with a single forecast window; it is not the specification used for the results in the manuscript (see [`runs/revision/`](runs/revision/README.md)).
+The demo (1) zero-shot forecasts the post-policy window (2025-01-05 → 2025-04-30) with Chronos-Bolt using only pre-policy history, (2) scores forecast accuracy on a held-out pre-policy validation window (2024-01-05 → 2024-04-30), and (3) computes per-route and overall policy effects (deviations from the no-policy counterfactual). The demo is a quick, CPU-only check of the installation: Chronos-Bolt with a single forecast window and no calibration. It is not the specification used for the results in the manuscript (see [`runs/revision/`](runs/revision/README.md)).
 
-**Expected output.** Console output reports per-route validation accuracy (median R² ≈ 0.80, 90%-PI coverage ≈ 0.92 across 246 routes) and the policy-effect summary (overall bus ridership ≈ +2% versus the no-policy counterfactual, outside the 90% prediction interval). Files land in `demo_output/`:
+**Expected output.** Console output reports per-route validation accuracy (median R² ≈ 0.78, 90%-PI coverage ≈ 0.94 across 246 routes) and the policy-effect summary (overall bus ridership ≈ +6% versus the uncalibrated no-policy forecast; this panel includes student fares and Bronx local routes and the forecast is not calibrated, so the number differs from the manuscript's estimate). Files land in `demo_output/`:
 
 ```
 demo_cf_mu.csv / demo_cf_lower.csv / demo_cf_upper.csv   # counterfactual triplet
@@ -82,7 +82,7 @@ demo_effects_by_route.csv / demo_effects_overall.csv     # policy-effect summari
 demo_forecast_<route>.png                                # forecast plot, busiest route
 ```
 
-**Expected run time** on a normal desktop computer (CPU-only): **~2 minutes on the first run** (dominated by a one-time ~460 MB download of the Chronos-2 weights from Hugging Face), **~20 seconds on subsequent runs** (measured: 19 s on an Apple M2 MacBook).
+**Expected run time** (CPU-only): the first run is dominated by a one-time ~780 MB download of the Chronos-Bolt weights from Hugging Face; later runs take one to a few minutes (measured: 85 s on a multi-core Linux server; not re-measured on a laptop since the switch to Chronos-Bolt).
 
 ## 4. Instructions for use
 
@@ -152,7 +152,7 @@ actual = load_actual("bus")                                # date × route
 window = get_window("bus", "test")                         # 2025-01-05 → 2025-04-30
 history = actual.loc[actual.index <= window.train_end]
 
-forecaster = build_forecaster(load_model("timesfm"))       # or chronos / pcn / deepar / ...
+forecaster = build_forecaster(load_model("timesfm"))       # or chronos_bolt / pcn / deepar / ...
 result = forecaster.fit_predict(
     history,
     start=pd.Timestamp(window.test_start),
@@ -170,7 +170,7 @@ nyc_congestion_pricing/
 ├── configs/
 │   ├── paths.yaml                # data/output roots
 │   ├── modes/{bus,bus_ns,subway,subway_ns,subway_ns22,replica}.yaml   # per-mode windows + preprocessing
-│   └── models/{arima,prophet,deepar,pcn,chronos,chronos_bolt,timesfm,nhits,tft,bsts}.yaml
+│   └── models/{arima,prophet,deepar,pcn,chronos_bolt,timesfm,nhits,tft,bsts}.yaml
 │
 ├── nyc_cp/                       # the package
 │   ├── config.py                 # config loaders + path resolution + get_window
@@ -217,9 +217,8 @@ All forecasters implement `nyc_cp.models.base.BaseForecaster` (`fit(history) →
 
 | Model        | Config                | Library               | Notes                                                              |
 |--------------|-----------------------|-----------------------|--------------------------------------------------------------------|
-| Chronos-Bolt | `chronos_bolt.yaml`   | `chronos-forecasting` | **Main model in the manuscript.** Released 2024-11-26, before the policy. |
+| Chronos-Bolt | `chronos_bolt.yaml`   | `chronos-forecasting` | **Main model in the manuscript.** Released 2024-11-26, before the policy. Chronos-2 (released after the policy took effect) is not used and not supported. |
 | TimesFM-2.0  | `timesfm.yaml`        | `timesfm`             | Robustness check. Released 2024-12-30, before the policy.          |
-| Chronos-2    | `chronos.yaml`        | `chronos-forecasting` | Used by the demo only: released after the policy took effect, so not used for the results. |
 
 **Baselines / comparisons:**
 
