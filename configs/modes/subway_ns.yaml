@@ -1,0 +1,17 @@
+# Subway station ENTRIES excluding student fare classes ("Metrocard - Students", "OMNY - Students").
+# Motivation: the Sept-2024 Student OMNY roll-out raised counted student entries by ~55% (same break as bus_ns).
+# Same 424 stations and windows as subway; direction O only (fare class is recorded at entry).
+mode: subway_ns
+base_data: subway
+drop_all_zero_columns: true
+weekday_only: false
+
+windows:
+  val:
+    train_end:  "2024-01-04"
+    test_start: "2024-01-05"
+    test_end:   "2024-04-30"
+  test:
+    train_end:  "2025-01-04"
+    test_start: "2025-01-05"
+    test_end:   "2025-04-30"

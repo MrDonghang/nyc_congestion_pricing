@@ -1,9 +1,21 @@
-"""Chronos-2 forecaster — Amazon's zero-shot time-series foundation model.
+"""Chronos forecaster — Amazon's zero-shot time-series foundation models.
 
-Chronos-2 is encoder-only (~120M params) with cross-item attention, native
-multivariate / covariate support, max prediction_length=1024, max context=8192.
-We use ``predict_df`` which accepts the full panel at once and runs cross-item
-in-context learning.
+Two checkpoints are wired up through the same class (``type: chronos``):
+
+* **Chronos-2** (``amazon/chronos-2``, released 2025-10-20) — encoder-only
+  (~120M params) with cross-item attention; ``predict_df`` runs the whole
+  panel at once with cross-item in-context learning. Released AFTER the
+  2025-01-05 policy start, so it is no longer used for headline results.
+* **Chronos-Bolt** (``amazon/chronos-bolt-base``, released 2024-11-26) —
+  univariate, trained to emit the 0.1 … 0.9 quantile grid, native horizon 64
+  (longer horizons are rolled out autoregressively on the median). Because
+  the model cannot emit 0.05 / 0.95 directly, we request 0.1 / 0.5 / 0.9 and
+  extrapolate the 90% PI under a Gaussian assumption:
+  ``sigma = (q90 - q10) / (2 * 1.2816)``, ``lo/hi = q50 ∓ 1.6449 * sigma``.
+  This keeps the ``coverage_level`` contract consistent with every other
+  forecaster (and with ``effects._recover_sigma``). Downstream HQC
+  calibration rebuilds the PI from residual quantiles anyway, so the
+  approximation only affects the *raw* Bolt interval.
 """
 
 from __future__ import annotations
@@ -69,28 +81,49 @@ class ChronosForecaster(BaseForecaster):
         )
         long["timestamp"] = pd.to_datetime(long["timestamp"])
 
-        log.info("Chronos predict: %d series × ~%d timesteps → horizon %d", long["item_id"].nunique(), len(long) // long["item_id"].nunique(), n)
+        n_series = long["item_id"].nunique()
+        log.info("Chronos predict (%s): %d series × ~%d timesteps → horizon %d",
+                 type(self._pipeline).__name__, n_series, len(long) // max(n_series, 1), n)
+
+        is_bolt = type(self._pipeline).__name__ == "ChronosBoltPipeline"
+        if is_bolt:
+            # Bolt: fixed 0.1..0.9 quantile grid, no batch_size kwarg. Ask for
+            # the 10/50/90 grid and Gaussian-extrapolate to the requested PI.
+            q_req = [0.1, 0.5, 0.9]
+            extra = {}
+        else:
+            q_req = [q_lo, 0.5, q_hi]
+            extra = {"batch_size": self.batch_size}
+
         pred_df = self._pipeline.predict_df(
             long,
             prediction_length=n,
-            quantile_levels=[q_lo, 0.5, q_hi],
+            quantile_levels=q_req,
             id_column="item_id",
             timestamp_column="timestamp",
             target="target",
-            batch_size=self.batch_size,
+            **extra,
         )
 
-        # Long → wide. Chronos returns columns like "0.05", "0.5", "0.95".
-        col_lo = f"{q_lo}" if f"{q_lo}" in pred_df.columns else str(round(q_lo, 4))
-        col_hi = f"{q_hi}" if f"{q_hi}" in pred_df.columns else str(round(q_hi, 4))
-        col_mid = "0.5"
+        def _col(q: float) -> str:
+            return f"{q}" if f"{q}" in pred_df.columns else str(round(q, 4))
 
         def _pivot(value_col: str) -> pd.DataFrame:
             out = pred_df.pivot(index="timestamp", columns="item_id", values=value_col)
             out.index = pd.to_datetime(out.index)
             return out.reindex(idx).reindex(columns=self._history.columns)
 
-        mu = _pivot(col_mid)
-        lo = _pivot(col_lo)
-        hi = _pivot(col_hi)
+        mu = _pivot(_col(0.5))
+        if is_bolt:
+            from scipy.stats import norm
+
+            q10, q90 = _pivot(_col(0.1)), _pivot(_col(0.9))
+            sigma = (q90 - q10) / (2 * norm.ppf(0.9))
+            z = norm.ppf(1.0 - alpha / 2)
+            lo = mu - z * sigma
+            hi = mu + z * sigma
+            log.info("Bolt PI: extrapolated 0.1/0.9 grid to %.0f%% interval (z=%.3f)", 100 * self.coverage_level, z)
+        else:
+            lo = _pivot(_col(q_lo))
+            hi = _pivot(_col(q_hi))
         return ForecastResult(mu=mu, lower=lo, upper=hi, coverage_level=self.coverage_level)

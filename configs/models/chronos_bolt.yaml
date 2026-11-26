@@ -1,0 +1,10 @@
+# Chronos-Bolt (released 2024-11-26, i.e. BEFORE the 2025-01-05 policy start).
+# Replaces Chronos-2 (released 2025-10-20) to rule out pretraining leakage.
+# Same ChronosForecaster class: BaseChronosPipeline.predict_df is inherited by
+# ChronosBoltPipeline; horizons > 64 are rolled out autoregressively.
+type: chronos
+model_id: amazon/chronos-bolt-base
+device: cuda
+dtype: bfloat16
+batch_size: 64
+coverage_level: 0.9

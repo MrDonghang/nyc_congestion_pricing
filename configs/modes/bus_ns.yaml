@@ -1,0 +1,17 @@
+# Bus ridership EXCLUDING student fare classes ("Metrocard - Students", "OMNY - Students").
+# Motivation: Sept 2024 student OMNY roll-out roughly doubled counted student boardings
+# (measurement break inside the training tail / 2025 test window). Same routes & windows as bus.
+mode: bus_ns
+base_data: bus
+exclude_columns: ["B60", "M116", "Q4", "S46"]
+weekday_only: false
+
+windows:
+  val:
+    train_end:  "2024-01-04"
+    test_start: "2024-01-05"
+    test_end:   "2024-04-30"
+  test:
+    train_end:  "2025-01-04"
+    test_start: "2025-01-05"
+    test_end:   "2025-04-30"

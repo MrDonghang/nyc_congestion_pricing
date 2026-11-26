@@ -48,8 +48,25 @@ def load_paths() -> dict[str, Any]:
     return base
 
 
+PLACEBO_SEP = "-"
+
+
+def base_mode(mode: str) -> str:
+    """Resolve a placebo alias to its data mode.
+
+    ``bus-p2405`` → ``bus``. Placebo aliases share the base mode's data file,
+    preprocessing and id column but carry their own (shifted) forecast windows
+    in ``configs/modes/placebo/<alias>.yaml``; outputs land under
+    ``<output_root>/<alias>/`` so they never collide with the real run.
+    """
+    return mode.split(PLACEBO_SEP, 1)[0]
+
+
 def load_mode(mode: str) -> dict[str, Any]:
-    return _read_yaml(CONFIG_DIR / "modes" / f"{mode}.yaml")
+    for cand in (CONFIG_DIR / "modes" / f"{mode}.yaml", CONFIG_DIR / "modes" / "placebo" / f"{mode}.yaml"):
+        if cand.exists():
+            return _read_yaml(cand)
+    raise FileNotFoundError(f"No mode config for {mode!r} (looked in configs/modes/ and configs/modes/placebo/)")
 
 
 def load_model(name: str) -> dict[str, Any]:
@@ -96,7 +113,7 @@ def _resolve(root: str | Path, rel: str) -> Path:
 def actual_csv(mode: str, direction: Direction = "all", paths: dict | None = None) -> Path:
     """Path to the daily/weekly ridership CSV for ``mode``."""
     paths = paths or load_paths()
-    spec = paths["modes"][mode]
+    spec = paths["modes"][base_mode(mode)]
     direction_long = {"O": "origin", "D": "destination"}.get(direction, "all")
     template: str = spec["actual"]
     rel = template.format(direction=direction, direction_long=direction_long)

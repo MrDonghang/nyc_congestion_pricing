@@ -13,12 +13,24 @@ modes:
     actual: bus/bus_data_2022_2025_daily_final.csv
     freq: D
     directions: ["all"]              # bus has no O/D split
+  bus_ns:                              # bus with student fare classes removed (see runs/revision/fetch_bus_nostudent.py)
+    actual: bus/bus_nostudent_2022_2025_daily_final.csv
+    freq: D
+    directions: ["all"]
   subway:
     actual: subway/subway_2023_2025_daily_{direction}.csv
     freq: D
     # "total" = O + D per (station, day) — analyses overall ridership at each
     # station regardless of whether the rider boarded or alighted there.
     directions: ["O", "D", "total"]
+  subway_ns:                           # subway entries EXCLUDING student fare classes (runs/revision/build_subway_nostudent.py); entries only
+    actual: subway/subway_nostudent_2023_2025_daily_{direction}.csv
+    freq: D
+    directions: ["O"]
+  subway_ns22:                         # subway_ns with history from 2022-01-01 (context for the models; runs/revision/build_subway_nostudent22.py)
+    actual: subway/subway_nostudent_2022_2025_daily_{direction}.csv
+    freq: D
+    directions: ["O"]
   replica:
     actual: replica/od/census_tract_{direction_long}_matrix.csv
     freq: W
