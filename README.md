@@ -12,7 +12,7 @@ The analysis:
 4. Estimates **daily and cumulative effects** as deviations of observed ridership from the calibrated counterfactual, and judges them against **pseudo-policy dates** in 2024, when no policy was in place (in-time placebo).
 5. Relates station-, route- and tract-level effects to **location and census-tract demographics**.
 
-The scripts for steps 2–5 are in [`runs/revision/`](runs/revision/README.md), which documents the specification and the order in which to run them. The package `nyc_cp` and the CLIs in `scripts/` provide the data processing, the forecasters (including ARIMA, Prophet, DeepAR, PCN, BSTS, NHITS and TFT as comparisons) and the earlier single-window pipeline with hierarchical quantile calibration (HQC), described in §4 below.
+The scripts for steps 2–5 are in [`runs/revision/`](runs/revision/README.md), which documents the specification and the order in which to run them. The package `nyc_cp` and the CLIs in `scripts/` provide the data processing, the forecasters (including ARIMA, Prophet, DeepAR, PCN, BSTS, NHITS and TFT as comparison models) and single-window forecasts for the model comparisons (§4).
 
 ---
 
@@ -88,9 +88,9 @@ demo_forecast_<route>.png                                # forecast plot, busies
 
 ### Running on your own data
 
-The CLIs below run the single-window pipeline (one validation and one test window per mode) with HQC calibration. The results in the manuscript come from the rolling-origin pipeline in [`runs/revision/`](runs/revision/README.md); the CLIs remain useful for building the data panels (step 1) and for the baseline-model comparisons.
+The CLIs below build the data panels and run single-window forecasts (one validation and one test window per mode), which are used to compare forecasting models. The results in the manuscript come from the rolling-origin pipeline in [`runs/revision/`](runs/revision/README.md).
 
-Point `configs/paths.yaml` (or a gitignored machine-local override `configs/paths.local.yaml` — only changed keys required) at your data roots, then run the CLIs below. Raw input feeds are the public MTA sources and the Replica subscription data listed in the paper's Data Availability statement.
+Point `configs/paths.yaml` (or a gitignored machine-local override `configs/paths.local.yaml` — only changed keys required) at your data roots first. Raw input feeds are the public MTA sources and the Replica subscription data listed in the paper's Data Availability statement.
 
 ```bash
 # 1. Raw → daily/weekly matrices  (skip if you already have data_processed/)
@@ -98,36 +98,20 @@ python -m scripts.process_data  --mode bus      --hourly-2020-2024 ...  --hourly
 python -m scripts.process_data  --mode subway   --od-estimate ...        --hourly ...
 python -m scripts.process_data  --mode replica  --raw-dir ...            --geo-csv ...
 
-# 2. Train + forecast (val tunes / calibrates; test is the counterfactual horizon)
-#    --window accepts val / validation / test  (val and validation are aliases)
-#    Run val and test for the same model so step 3 has both windows to work with.
-python -m scripts.train_forecast --mode bus      --model timesfm --window val
-python -m scripts.train_forecast --mode bus      --model timesfm --window test
-python -m scripts.train_forecast --mode subway   --model timesfm --window val  --direction O
-python -m scripts.train_forecast --mode subway   --model timesfm --window test --direction O
+# 2. Forecast a window with any model (--window accepts val / validation / test)
+python -m scripts.train_forecast --mode bus      --model chronos_bolt --window val
+python -m scripts.train_forecast --mode bus      --model chronos_bolt --window test
+python -m scripts.train_forecast --mode subway   --model chronos_bolt --window val  --direction O
 
-# 3. Calibrate with HQC (--per-unit-intercept).
-#    Writes a new model named "<base>_qrcal_intercept" alongside the original outputs.
-#    NOTE: running calibrate_forecast WITHOUT --per-unit-intercept gives the global
-#    QR baseline ("<base>_qrcal"), a comparison variant.
-python -m scripts.calibrate_forecast --mode bus    --base-model timesfm --per-unit-intercept --insample-val
-python -m scripts.calibrate_forecast --mode subway --base-model timesfm --per-unit-intercept --direction O --insample-val
-
-# 4. Compare model accuracy
-python -m scripts.compare_models  --mode bus --window test
-
-# 5. Policy effects (observed vs. counterfactual) — use the HQC-calibrated model
-python -m scripts.compute_effects --mode bus --model timesfm_qrcal_intercept --window test
-
-# 6. Geospatial + demographic regression
-python -m scripts.geospatial_analysis --mode bus --model timesfm_qrcal_intercept --window test
+# 3. Compare model accuracy on a window
+python -m scripts.compare_models  --mode bus --window val
 ```
 
 ### Reproducing the results in the manuscript
 
 1. **Data.** Download the raw feeds listed in the paper's Data Availability statement (MTA Bus Hourly Ridership, MTA Subway Hourly Ridership, Replica weekly OD) and build the processed panels: step 1 above, then the student-fare-excluded panels with `runs/revision/fetch_bus_nostudent.py`, `finalize_bus_nostudent.py`, `build_subway_nostudent.py` and `build_subway_nostudent22.py`.
 2. **Counterfactuals, calibration, inference and figures.** Follow the reproduction table in [`runs/revision/README.md`](runs/revision/README.md): rolling-origin forecasts for `chronos_bolt` (main) and `timesfm` (robustness), quantile-regression calibration, pseudo-policy-date inference, and the figure scripts.
-3. **Baseline-model comparisons.** Run steps 2–5 of the CLIs above for the comparison models (`arima`, `prophet`, `deepar`, `pcn`, `bsts`, `nhits`, `tft`).
+3. **Model comparisons.** Run steps 2–3 of the CLIs above for the comparison models (`arima`, `prophet`, `deepar`, `pcn`, `bsts`, `nhits`, `tft`).
 4. **Determinism.** All stochastic components are seeded (`nyc_cp.utils.set_seed(42)`); the foundation-model forecasts are zero-shot (no training), so results are reproducible up to library/hardware numerics.
 
 Forecast windows per mode for the single-window CLIs (defined in `configs/modes/<mode>.yaml`); the rolling-origin pipeline sets its own origins:
@@ -174,7 +158,6 @@ nyc_congestion_pricing/
 │
 ├── nyc_cp/                       # the package
 │   ├── config.py                 # config loaders + path resolution + get_window
-│   ├── calibration.py            # HQC + QR calibration (fit on val, apply to test)
 │   ├── utils/                    # seed, normalize, logging
 │   ├── data/                     # raw → matrix processors + actual-CSV loader
 │   ├── models/                   # BaseForecaster + all forecasters
@@ -183,8 +166,8 @@ nyc_congestion_pricing/
 │   └── analysis/                 # policy-effect pipeline + spatial/demographic regression
 │
 ├── scripts/                      # thin CLIs (process_data, train_forecast,
-│                                 #   calibrate_forecast, compare_models,
-│                                 #   compute_effects, geospatial_analysis)
+│                                 #   compare_models, compute_effects,
+│                                 #   geospatial_analysis)
 ├── runs/revision/                # rolling-origin pipeline behind the manuscript's results
 │                                 #   (forecast replay, calibration, placebo inference, figures)
 ├── notebooks/                    # 00_demo.py + example workflows + diagnostics
@@ -236,17 +219,7 @@ Switch PCN variants with `variant: bidirectional` in `configs/models/pcn.yaml`.
 
 ## Calibration
 
-The manuscript's results use the quantile-regression calibration on rolling forecast origins implemented in `runs/revision/qr_native.py` (see [`runs/revision/README.md`](runs/revision/README.md)).
-
-The single-window CLIs use **HQC**, implemented in `nyc_cp/calibration.py` and driven by `scripts/calibrate_forecast.py`. HQC (hierarchical quantile calibration: a per-unit residual intercept plus a pooled quantile regression) is selected with `--per-unit-intercept`:
-
-```bash
-python -m scripts.calibrate_forecast \
-  --mode subway --base-model timesfm --direction O \
-  --per-unit-intercept --insample-val
-```
-
-This writes a calibrated model named `<base>_qrcal_intercept`, which downstream `compute_effects` / `geospatial_analysis` take via `--model timesfm_qrcal_intercept`. Running without `--per-unit-intercept` gives the global-QR baseline (`<base>_qrcal`); `--per-unit` gives the fully per-unit variant (`<base>_qrcal_perunit`) — both are comparison variants.
+The quantile-regression calibration on rolling forecast origins is implemented in `runs/revision/qr_native.py`; see [`runs/revision/README.md`](runs/revision/README.md) for the specification.
 
 ## Configuration
 
@@ -266,8 +239,6 @@ Forecast triplets land at `<output_root>/<mode>/<model>/[<direction>/]`:
 * `<mode>_<model>_<window>[_<direction>]_lower.csv`  — lower PI bound
 * `<mode>_<model>_<window>[_<direction>]_upper.csv`  — upper PI bound
 * `<mode>_<model>_<window>[_<direction>]_evaluation.csv` — per-series metrics
-
-Calibrated outputs live alongside the originals under `<output_root>/<mode>/<base>_qrcal_intercept/[<direction>/]` (HQC; `_qrcal` / `_qrcal_perunit` for the comparison calibrations) with the same `_mu / _lower / _upper` triplet naming (no `_evaluation.csv` from the calibration step itself).
 
 Policy-effect outputs land under `.../effects/`; spatial-regression outputs under `.../causal/`.
 
